@@ -1,0 +1,3 @@
+pyserial
+pyephem
+git+https://github.com/raffysommy/pysynscan.git
