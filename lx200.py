@@ -436,10 +436,16 @@ class LX200Proxy:
         """Handles DEC getting in DD*MM:SS format"""
         arduinodec.write(":Gd#".encode())
         dec_read = arduinodec.readline()
-        ## Meridan unflip in the function
-        coord=steps_to_coord(int(dec_read))
-        return f"{coord}#"
 
+        try:
+            steps = int(dec_read)
+            self._last_valid_dec_steps = steps
+        except ValueError:
+            # If it fails, use the last valid steps if available
+            steps = getattr(self, '_last_valid_dec_steps', 0)
+
+        coord = steps_to_coord(steps)
+        return f"{coord}#"
 
     def set_ra(self, command):
         """Handles RA setting in HH:MM:SS"""
