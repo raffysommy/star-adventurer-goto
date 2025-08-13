@@ -8,13 +8,29 @@ import threading
 from datetime import datetime
 import ephem
 from typing import Callable
+# ========================== CONFIGURATION ============================
 
-pierEastSide = False ## Side of the lights on the star adventurer, with camera pointing in the opposite direction of north pole
+SERVER_HOST         = '127.0.0.1'
+SERVER_PORT         = 5000
+
+SYNASCAN_HOST       = '127.0.0.1'
+SYNASCAN_PORT       = 1880
+
+SERIAL_PORT         = '/dev/ttyUSB1'
+
+OBSERVER_LON        = 14.4377
+OBSERVER_LAT        = 40.8728
+
+PIER_EAST_SIDE = False ## Side of the lights on the star adventurer, with camera pointing in the opposite direction of north pole
+
+# ========================== CONFIGURATIONEND ============================
+
+pierEastSide = PIER_EAST_SIDE 
 
 meridian_flipped = False
 
 my_mount = ephem.Observer()
-my_mount.lon, my_mount.lat = '14.4377', '40.8728'
+my_mount.lon, my_mount.lat = OBSERVER_LON, OBSERVER_LAT
 def get_siderial_time():
     global my_mount
     my_mount.date = datetime.now()
@@ -32,7 +48,7 @@ def get_right_ascension(ha):
     return (my_mount.sidereal_time() / ephem.pi * 180 - ha) % 360.0
 
 arduinodec = serial.Serial('/dev/ttyUSB1', baudrate=115200)
-smc=synscan.motors("127.0.0.1", 1880)
+smc=synscan.motors(SYNASCAN_HOST, SYNASCAN_PORT)
 smc.get_values({},True)
 offset_star_adventurer = 2 #degrees: This compensate the fact that the start adventurer is not able to go to zero RA, so this is the 0 position
 smc.set_pos(offset_star_adventurer,0)
@@ -299,7 +315,7 @@ def steps_to_coord(steps):
 
 # LX200 Proxy Class
 class LX200Proxy:
-    def __init__(self, host='127.0.0.1', port=5000):
+    def __init__(self, host=SERVER_HOST, port=SERVER_PORT):
         self.host = host
         self.port = port
         self.sock = None
@@ -325,8 +341,12 @@ class LX200Proxy:
                 if not data:
                     break
                 print(f"Received: {data}")
-                response = self.process_command(data)
-                print(f"Response: {response}")
+                try:
+                    response = self.process_command(data)
+                    print(f"Response: {response}")
+                except Exception as e:
+                    print(f"[ERROR] Command '{data}' caused exception: {e}")
+                    response = "#"
                 if response:
                     self.client_socket.sendall(response.encode('utf-8'))
         finally:
@@ -508,31 +528,55 @@ class LX200Proxy:
             duration = re.match(r"n(\d+)", direction)
             if duration and duration_flag:
                 value = int(duration.group(1))
-                scheduler_slew_north.schedule_event(value, lambda:  stop_guiding_arduino())
-            arduinodec.write(":Mn#".encode())
+                if not meridian_flipped:
+                    scheduler_slew_north.schedule_event(value, lambda:  stop_guiding_arduino())
+                else:
+                    scheduler_slew_south.schedule_event(value, lambda:  stop_guiding_arduino())    
+            if not meridian_flipped:
+                arduinodec.write(":Mn#".encode())
+            else:
+                arduinodec.write(":Ms#".encode())                
             arduinodec.readline()
         elif direction.startswith("s"):
             ra_guiding_south = True
             duration = re.match(r"s(\d+)", direction)
             if duration and duration_flag:
                 value = int(duration.group(1))
-                scheduler_slew_south.schedule_event(value, lambda:  stop_guiding_arduino())
-            arduinodec.write(":Ms#".encode())
+                if not meridian_flipped:
+                    scheduler_slew_south.schedule_event(value, lambda:  stop_guiding_arduino())
+                else:
+                    scheduler_slew_north.schedule_event(value, lambda:  stop_guiding_arduino())    
+            if not meridian_flipped:
+                arduinodec.write(":Ms#".encode())
+            else:
+                arduinodec.write(":Mn#".encode())  
             arduinodec.readline()
         elif direction.startswith("w"):
             ra_guiding_west = True
             duration = re.match(r"w(\d+)", direction)
             if duration and duration_flag:
                 value = int(duration.group(1))
-                scheduler_slew_west.schedule_event(value, lambda:  stop_guiding_skywatcher())
-            slew_ra_west()
+                if not meridian_flipped:
+                    scheduler_slew_west.schedule_event(value, lambda:  stop_guiding_skywatcher())
+                else:
+                    scheduler_slew_east.schedule_event(value, lambda:  stop_guiding_skywatcher())   
+            if not meridian_flipped:
+                slew_ra_west()
+            else:
+                slew_ra_east()
         elif direction.startswith("e"):
             ra_guiding_east = True
             duration = re.match(r"e(\d+)", direction)
             if duration and duration_flag:
                 value = int(duration.group(1))
-                scheduler_slew_east.schedule_event(value, lambda:  stop_guiding_skywatcher())
-            slew_ra_east()
+                if not meridian_flipped:
+                    scheduler_slew_east.schedule_event(value, lambda:  stop_guiding_skywatcher())
+                else:
+                    scheduler_slew_west.schedule_event(value, lambda:  stop_guiding_skywatcher())   
+            if not meridian_flipped:
+                slew_ra_east()
+            else:
+                slew_ra_west()
         return "0"
 
     def stop_all(self):

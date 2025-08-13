@@ -122,7 +122,7 @@ pip install -r requirements.txt
 
 Before running the server, you must configure the Python script with your specific setup.
 
-Open the `new_lx200.py` file and edit the following constants at the top:
+Open the `lx200.py` file and edit the following constants at the top:
 
 -   **`SERIAL_PORT`**: Change this to the serial port your Arduino is connected to (e.g., `COM3` on Windows, `/dev/ttyUSB1` on Linux).
     
@@ -131,9 +131,9 @@ Open the `new_lx200.py` file and edit the following constants at the top:
 -   **`OBSERVER_LAT`**: Set your observer's latitude in decimal degrees (North is positive).
 
 **Initial Pier Side**: You may need to set your mount's starting pier side. In `new_lx200.py`, find the `TelescopeController` class and its `__init__` method. Set the `self.is_pier_east_side` variable according to your physical setup.
--- **Example:** Set `self.is_pier_east_side = False` (the default) if the  camera is on the side of the Star Adventurer with the mode dial and lights, with your camera pointing in the opposite direction of the celestial pole. Set it to `True` if the lights are on the other side or you are pointing towards the celestial pole. If you make it wrong the mount will move in the opposite direction, so just try to flip it :)
+-- **Example:** Set `pier_east_side = False` (the default) if the  camera is on the side of the Star Adventurer with the mode dial and lights, with your camera pointing in the opposite direction of the celestial pole. Set it to `True` if the lights are on the other side or you are pointing towards the celestial pole. If you make it wrong the mount will move in the opposite direction, so just try to flip it :)
 
-You may also need to adjust `DEC_STEPS_PER_180_DEG` if your motor or gearing setup is different.
+You may also need to adjust `step_per_rev_dec` if your motor or gearing setup is different.
 
 ## 5. Advanced Topics & Explanation
 
@@ -217,7 +217,7 @@ sudo systemctl start ser2net
 Once everything is configured, run the main script from your terminal:
 
 ```
-python new_lx200.py
+python lx200.py
 
 ```
 
