@@ -1,0 +1,4 @@
+secrets*.ini
+.pio/
+# the repo-root .gitignore ignores lib/ (Python template); this one is firmware source
+!lib/

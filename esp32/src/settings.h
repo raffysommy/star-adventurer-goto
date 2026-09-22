@@ -1,0 +1,17 @@
+#pragma once
+#include <Arduino.h>
+
+// Runtime settings persisted in NVS. Defaults match lx200.py's CONFIGURATION block.
+struct Settings {
+  double lat = 40.8728;
+  double lonEast = 14.4377;
+  double utcOffset = 0;          // hours, local = UTC + utcOffset (from :SG or the browser)
+  bool decAxisReversed = false;  // DEC_AXIS_REVERSED
+  bool flipRaGuiding = false;    // FLIP_RA_GUIDING_ON_MERIDIAN
+  uint16_t lx200Port = 5001;     // SERVER_PORT
+};
+
+extern Settings settings;
+
+void settingsLoad();
+void settingsSave();
