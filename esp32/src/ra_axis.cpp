@@ -110,9 +110,10 @@ static void onConnect() {
   siderealT1 = trackT1 = sw::t1ForRate(params, SIDEREAL);
   long counts = 0;
   sw::getPos(AXIS, counts);
-  // A freshly powered mount reads 0; anything else means only the ESP restarted
-  // (e.g. OTA) and the register still holds a valid sync.
-  if (counts == 0) {
+  // A freshly powered mount reads ~0 (it starts tracking on its own, so not exactly
+  // 0 by the time we look); anything else means only the ESP restarted (e.g. OTA)
+  // and the register still holds a valid sync.
+  if (labs(counts) < sw::degToCounts(params, 1.0)) {
     sw::setPos(AXIS, sw::degToCounts(params, OFFSET));
     logf("ra: fresh mount, register set to home (HA %.1f deg)", OFFSET);
   } else {
