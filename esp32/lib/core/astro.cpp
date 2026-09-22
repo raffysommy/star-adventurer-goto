@@ -14,6 +14,12 @@ double wrap360(double deg) {
   return r;
 }
 
+// Python's % for a positive divisor
+static double pyMod(double a, double b) {
+  double r = fmod(a, b);
+  return r < 0 ? r + b : r;
+}
+
 double julianDate(double unixUtc) { return unixUtc / 86400.0 + 2440587.5; }
 
 double gmstDeg(double unixUtc) {
@@ -45,6 +51,20 @@ double reportedRa(double axisRa, bool flipped, double lst, double offset) {
   if (!flipped) return axisRa;
   return rightAscension(wrap360(hourAngle(axisRa, lst, offset) - 180), lst, offset);
 }
+
+// ---------------------------------------------------------------- DEC steps
+
+long decToSteps(double deg) {
+  return (long)(((deg * 3600.0 + 3600.0 * 180.0) / (3600.0 * 360.0)) * DEC_STEPS_PER_REV);
+}
+
+double stepsToDec(long steps, bool reverse) {
+  double d = ((double)steps / DEC_STEPS_PER_REV) * 360.0 - 180.0;
+  if (reverse) d = pyMod((180 - d) + 180, 360) - 180;  // flip back the meridian dec coordinates
+  return d;
+}
+
+double decForSteps(double requestedDeg, bool reverse) { return reverse ? 180 - requestedDeg : requestedDeg; }
 
 // ---------------------------------------------------------------- formatting
 

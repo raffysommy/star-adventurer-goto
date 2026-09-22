@@ -59,6 +59,18 @@ void test_hms_matches_lx200() {
   }
 }
 
+// set_dec() -> steps -> steps_to_coord() round trip, both DEC orientations
+void test_dec_steps_match_lx200() {
+  for (size_t i = 0; i < N(DEC_CASES); i++) {
+    const DecCase &c = DEC_CASES[i];
+    long steps = decToSteps(decForSteps(c.deg, c.reverse));
+    TEST_ASSERT_EQUAL_INT32(c.steps, steps);
+    TEST_ASSERT_DOUBLE_WITHIN(1e-9, c.back, stepsToDec(steps, c.reverse));
+    TEST_ASSERT_DOUBLE_WITHIN(0.002, c.deg, stepsToDec(steps, c.reverse));  // within one step
+  }
+  TEST_ASSERT_EQUAL_INT32(146400, decToSteps(0));
+}
+
 void test_parse_and_format() {
   double v;
   TEST_ASSERT_TRUE(parseSr(":Sr05:35:17#", v));
@@ -114,6 +126,7 @@ int main() {
   RUN_TEST(test_hour_angle_matches_lx200);
   RUN_TEST(test_meridian_flip_matches_lx200);
   RUN_TEST(test_hms_matches_lx200);
+  RUN_TEST(test_dec_steps_match_lx200);
   RUN_TEST(test_parse_and_format);
   RUN_TEST(test_unix_from_civil);
   return UNITY_END();

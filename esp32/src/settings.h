@@ -8,6 +8,7 @@ struct Settings {
   double utcOffset = 0;          // hours, local = UTC + utcOffset (from :SG or the browser)
   bool decAxisReversed = false;  // DEC_AXIS_REVERSED
   bool flipRaGuiding = false;    // FLIP_RA_GUIDING_ON_MERIDIAN
+  bool pierEast = false;         // PIER_EAST_SIDE: inverts the DEC motor direction (:CP)
   uint16_t lx200Port = 5001;     // SERVER_PORT
 };
 

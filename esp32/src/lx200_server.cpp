@@ -5,6 +5,7 @@
 #include <esp_timer.h>
 
 #include "clock.h"
+#include "dec_axis.h"
 #include "netlog.h"
 #include "ra_axis.h"
 #include "settings.h"
@@ -14,7 +15,7 @@ namespace lx200 {
 static const int MAX_CLIENTS = 2;
 
 static SemaphoreHandle_t lock;  // process() can be called from the server task and the web UI
-static State st = {false, 0, 0, 0, false, false, 0};
+static State st = {false, 0, false, false, 0};
 static bool targetValid = false;  // no :MS / :CM before a successful :Sr
 static esp_timer_handle_t decGuideTimer;
 
@@ -31,12 +32,16 @@ String reportedRa() {
   return fmtRa(astro::reportedRa(r.axisRa, st.meridianFlipped, ra::lst(), ra::OFFSET));
 }
 
+static bool reverseDec() { return st.meridianFlipped ^ settings.decAxisReversed; }
+
+// get_dec() / steps_to_coord()
 String reportedDec() {
   char b[16];
-  astro::formatDec(st.decCurrent, b, sizeof(b));
+  astro::formatDec(astro::stepsToDec(dec::position(), reverseDec()), b, sizeof(b));
   return b;
 }
 
+// End of a pulse's duration: the step move itself ends on its own
 static void decGuideEnd(void *) { st.guideNorth = st.guideSouth = false; }
 
 static String localTime(const char *fmt) {
@@ -63,11 +68,17 @@ static String slowMove(const String &cmd) {
   int ms = pulse ? dir.substring(1).toInt() : 0;
   char d = dir.length() ? dir[0] : 0;
   if (d == 'n' || d == 's') {
-    // DEC simulated: only the flags, so :D reports guiding while the pulse lasts
     st.guideNorth = d == 'n';
     st.guideSouth = d == 's';
+    // Beyond the pole (or with DEC_AXIS_REVERSED) north and south swap on the motor
+    bool north = (d == 'n') != reverseDec();
     esp_timer_stop(decGuideTimer);
-    if (ms > 0) esp_timer_start_once(decGuideTimer, (uint64_t)ms * 1000);
+    if (ms > 0) {
+      dec::guidePulse(north ? +1 : -1, ms);
+      esp_timer_start_once(decGuideTimer, (uint64_t)ms * 1000);  // only clears the :D flags
+    } else {
+      dec::guide(north ? +1 : -1);  // manual move until :Q
+    }
   } else if (d == 'e' || d == 'w') {
     bool swap = st.meridianFlipped && settings.flipRaGuiding;
     char rd = swap ? (d == 'e' ? 'w' : 'e') : d;
@@ -112,8 +123,11 @@ String process(const String &cmd) {
       r = "#";
     }
   } else if (cmd.startsWith(":Sd")) {
+    // set_dec(): beyond the pole the axis goes to 180 - dec
     if (astro::parseSd(c, v)) {
-      st.decTarget = v;
+      long steps = astro::decToSteps(astro::decForSteps(v, reverseDec()));
+      dec::setTarget(steps);
+      logf("lx200: target DEC %.4f -> %ld steps%s", v, steps, reverseDec() ? " (reversed)" : "");
       r = "#";
     }
   } else if (cmd.startsWith(":MS")) {
@@ -122,27 +136,25 @@ String process(const String &cmd) {
       r = "1No target#";
     } else {
       ra::gotoRa(st.raTarget);
-      st.decCurrent = st.decTarget;  // DEC simulated: arrives instantly
       r = "0";
     }
+    dec::slew();
   } else if (cmd.startsWith(":M")) {
     r = slowMove(cmd);
   } else if (cmd.startsWith(":Q")) {
     ra::stop();
     esp_timer_stop(decGuideTimer);
     st.guideNorth = st.guideSouth = false;
+    dec::stop();
     r = "";
   } else if (cmd.startsWith(":CM")) {
-    if (targetValid) {
-      ra::sync(st.raTarget);
-      st.decCurrent = st.decTarget;
-    } else {
-      logf("lx200: :CM without a target, ignored");
-    }
+    if (targetValid) ra::sync(st.raTarget);
+    else logf("lx200: :CM without an RA target, RA not synced");
+    dec::syncToTarget();
     r = ":Coordinates matched #";
   } else if (cmd.startsWith(":D")) {
     ra::State rs = ra::state();
-    bool busy = rs.slewing || rs.guideEast || rs.guideWest || st.guideNorth || st.guideSouth;
+    bool busy = rs.slewing || rs.guideEast || rs.guideWest || st.guideNorth || st.guideSouth || dec::slewing();
     r = busy ? String((char)127) + "#" : "#";
   } else if (cmd.startsWith(":GM")) {
     r = "Site1Name#";

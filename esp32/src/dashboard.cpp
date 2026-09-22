@@ -3,6 +3,7 @@
 #include <astro.h>
 
 #include "clock.h"
+#include "dec_axis.h"
 #include "lx200_server.h"
 #include "ra_axis.h"
 #include "settings.h"
@@ -25,7 +26,8 @@ input[type=number]{width:9em}
 <p><a href="/sys">system</a> | <a href="/log">log</a> | <a href="/update">firmware</a></p>
 <div class="grid">
 <div class="card"><div>Current RA</div><div class="value" id="ra">...</div></div>
-<div class="card"><div>Current DEC (simulated)</div><div class="value" id="dec">...</div></div>
+<div class="card"><div>Current DEC</div><div class="value" id="dec">...</div></div>
+<div class="card"><div>DEC steps / target</div><div class="value" id="decsteps">...</div></div>
 <div class="card"><div>Mount state</div><div class="value" id="state">...</div></div>
 <div class="card"><div>Meridian flipped</div><div class="value" id="flipped">...</div></div>
 <div class="card"><div>Effective DEC flip</div><div class="value" id="decflip">...</div></div>
@@ -41,10 +43,21 @@ input[type=number]{width:9em}
 <button onclick="if(confirm('Mount at home (counterweight down, pointing at the pole)?'))post('/api/home')">Set home</button>
 <span id="msg"></span>
 </div>
+<h2>DEC motor test</h2>
+<div class="card">
+<button onclick="dec('guide',{dir:'n',ms:2000})">Guide N 2 s</button>
+<button onclick="dec('guide',{dir:'s',ms:2000})">Guide S 2 s</button>
+<button onclick="dec('move',{steps:813})">+1&deg;</button>
+<button onclick="dec('move',{steps:-813})">-1&deg;</button>
+<button onclick="dec('move',{steps:8133})">+10&deg;</button>
+<button onclick="dec('move',{steps:-8133})">-10&deg;</button>
+<button onclick="dec('stop',{})">Stop DEC</button>
+</div>
 <h2>Runtime settings</h2>
 <div class="card">
 <label><input type="checkbox" id="dec_axis_reversed"> DEC_AXIS_REVERSED</label>
 <label><input type="checkbox" id="flip_ra_guiding"> FLIP_RA_GUIDING_ON_MERIDIAN</label>
+<label><input type="checkbox" id="pier_east"> PIER_EAST_SIDE (inverts DEC motor)</label>
 <label>Latitude <input type="number" step="0.0001" id="lat"> Longitude (east +) <input type="number" step="0.0001" id="lon"></label>
 <button onclick="saveSettings()">Apply settings</button>
 </div>
@@ -57,7 +70,8 @@ async function post(url,body){try{const r=await fetch(url,{method:"POST",body});
 catch(e){$("msg").textContent="Error"}setTimeout(()=>$("msg").textContent="",2000);refresh()}
 async function refresh(){try{
 const s=await(await fetch("/api/status",{cache:"no-store"})).json();
-$("ra").textContent=s.ra;$("dec").textContent=s.dec;$("state").textContent=s.state;
+$("ra").textContent=s.ra;$("dec").textContent=s.dec;
+$("decsteps").textContent=s.dec_steps+" / "+s.dec_target+(s.dec_moving?" (moving)":"");$("state").textContent=s.state;
 bool("flipped",s.meridian_flipped);bool("decflip",s.effective_dec_flip);
 $("ha").textContent=s.axis_ha.toFixed(4)+"° / "+s.counts;
 $("lst").textContent=s.lst_hms+" ("+s.lst.toFixed(3)+"°)";
@@ -65,19 +79,21 @@ $("clock").textContent=(s.clock_valid?new Date(s.clock*1000).toISOString().subst
 $("clock").className="value"+(s.clock_valid?"":" warn");
 $("stalls").textContent=s.stalls+" / "+s.kicks+" / "+s.keep_alives;
 if(!s.clock_valid&&!autoTime){autoTime=true;post("/api/time",timeBody())}
-if(!init){$("dec_axis_reversed").checked=s.dec_axis_reversed;$("flip_ra_guiding").checked=s.flip_ra_guiding;
+if(!init){$("dec_axis_reversed").checked=s.dec_axis_reversed;$("flip_ra_guiding").checked=s.flip_ra_guiding;$("pier_east").checked=s.pier_east;
 $("lat").value=s.lat;$("lon").value=s.lon;init=true}
 }catch(e){$("state").textContent="Web connection error"}}
+function dec(action,args){post("/api/dec",new URLSearchParams({action,...args}))}
 async function saveSettings(){await post("/api/settings",new URLSearchParams({
-dec_axis_reversed:$("dec_axis_reversed").checked?"1":"0",flip_ra_guiding:$("flip_ra_guiding").checked?"1":"0",
+dec_axis_reversed:$("dec_axis_reversed").checked?"1":"0",flip_ra_guiding:$("flip_ra_guiding").checked?"1":"0",pier_east:$("pier_east").checked?"1":"0",
 lat:$("lat").value,lon:$("lon").value}));init=false}
 refresh();setInterval(refresh,1000);
 </script></body></html>)HTML";
 
 // dashboard_mount_state()
 static String mountState(const ra::State &r, const lx200::State &l) {
-  if (!r.connected) return "MOUNT NOT CONNECTED";
+  if (!r.connected && !dec::moving()) return "RA MOUNT NOT CONNECTED";
   if (r.slewing) return strcmp(r.phase, "approach") ? "SLEWING" : "SLEWING (approach)";
+  if (dec::slewing()) return "SLEWING (DEC)";
   String dirs;
   if (l.guideNorth) dirs += "N/";
   if (l.guideSouth) dirs += "S/";
@@ -93,25 +109,31 @@ static void sendStatus() {
   double lst = ra::lst();
   char lstHms[16];
   astro::formatRa(lst, lstHms, sizeof(lstHms));
-  char buf[900];
+  char buf[1100];
   snprintf(buf, sizeof(buf),
            "{\"ra\":\"%s\",\"dec\":\"%s\",\"state\":\"%s\",\"phase\":\"%s\",\"meridian_flipped\":%s,"
            "\"dec_axis_reversed\":%s,\"flip_ra_guiding\":%s,\"effective_dec_flip\":%s,"
            "\"axis_ra\":%.6f,\"axis_ha\":%.6f,\"counts\":%ld,\"ra_target\":%.6f,\"lst\":%.6f,\"lst_hms\":\"%s\","
            "\"clock\":%.3f,\"clock_valid\":%s,\"clock_source\":\"%s\",\"utc_offset\":%.2f,\"lat\":%.4f,\"lon\":%.4f,"
-           "\"stalls\":%lu,\"kicks\":%lu,\"keep_alives\":%lu,\"lx200_clients\":%d}",
+           "\"stalls\":%lu,\"kicks\":%lu,\"keep_alives\":%lu,\"lx200_clients\":%d,"
+           "\"dec_steps\":%ld,\"dec_target\":%ld,\"dec_moving\":%s,\"pier_east\":%s}",
            lx200::reportedRa().c_str(), lx200::reportedDec().c_str(), mountState(r, l).c_str(), r.phase,
            l.meridianFlipped ? "true" : "false", settings.decAxisReversed ? "true" : "false",
            settings.flipRaGuiding ? "true" : "false", (l.meridianFlipped ^ settings.decAxisReversed) ? "true" : "false",
            r.axisRa, r.axisHa, r.counts, l.raTarget, lst, lstHms, clockNow(), clockValid() ? "true" : "false",
            clockSource(), settings.utcOffset, settings.lat, settings.lonEast, (unsigned long)r.stalls,
-           (unsigned long)r.kicks, (unsigned long)r.keepAlives, l.clients);
+           (unsigned long)r.kicks, (unsigned long)r.keepAlives, l.clients, dec::position(), dec::target(),
+           dec::moving() ? "true" : "false", settings.pierEast ? "true" : "false");
   srv->send(200, "application/json", buf);
 }
 
 static void postSettings() {
   settings.decAxisReversed = srv->arg("dec_axis_reversed") == "1";
   settings.flipRaGuiding = srv->arg("flip_ra_guiding") == "1";
+  if (srv->hasArg("pier_east")) {
+    settings.pierEast = srv->arg("pier_east") == "1";
+    dec::setInverted(settings.pierEast);
+  }
   if (srv->hasArg("lat") && srv->arg("lat").length()) settings.lat = srv->arg("lat").toDouble();
   if (srv->hasArg("lon") && srv->arg("lon").length()) settings.lonEast = srv->arg("lon").toDouble();
   settingsSave();
@@ -152,6 +174,25 @@ void dashboardBegin(WebServer &web) {
   });
   web.on("/api/goto_ha", HTTP_POST, [] {
     ra::gotoHa(srv->arg("ha").toDouble());
+    srv->send(200, "application/json", "{\"ok\":true}");
+  });
+  web.on("/api/dec", HTTP_POST, [] {
+    String a = srv->arg("action");
+    if (a == "move") {
+      dec::setTarget(dec::position() + srv->arg("steps").toInt());
+      dec::slew();
+    } else if (a == "goto") {
+      dec::setTarget(astro::decToSteps(srv->arg("deg").toDouble()));
+      dec::slew();
+    } else if (a == "guide") {
+      String c = ":Mg" + srv->arg("dir") + srv->arg("ms") + "#";
+      lx200::process(c);
+    } else if (a == "stop") {
+      dec::stop();
+    } else {
+      srv->send(400, "text/plain", "action: move&steps= | goto&deg= | guide&dir=n|s&ms= | stop\n");
+      return;
+    }
     srv->send(200, "application/json", "{\"ok\":true}");
   });
   web.on("/api/lx200", [] {

@@ -11,6 +11,7 @@
 
 #include "clock.h"
 #include "dashboard.h"
+#include "dec_axis.h"
 #include "lx200_server.h"
 #include "mount_usb.h"
 #include "netlog.h"
@@ -225,6 +226,8 @@ void setup() {
   webBegin();
   synscanUdpBegin();  // raw motor access for debugging; don't use while the RA task is driving
   ra::begin();
+  dec::begin();
+  dec::setInverted(settings.pierEast);
   lx200::begin();
 
   // A hang (e.g. starved idle tasks) reboots instead of silently killing Wi-Fi

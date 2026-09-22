@@ -39,6 +39,27 @@ def get_ra(pos, flipped, lst):
     return pos
 
 
+step_per_rev_dec = 585600 / 2
+
+
+def dec_to_steps(degrees):
+    dec_in_centi_degrees = degrees * 3600.0
+    return int(((dec_in_centi_degrees + 3600.0 * 180.0) / (3600.0 * 360.0)) * step_per_rev_dec)
+
+
+def steps_to_normalized_dec(steps, reverse_dec):  # steps_to_coord() before formatting
+    normalized_dec = (steps / step_per_rev_dec) * 360.0 - 180.0
+    if reverse_dec:
+        normalized_dec = ((180 - normalized_dec) + 180) % 360 - 180
+    return normalized_dec
+
+
+def set_dec_steps(degrees, reverse_dec):  # set_dec()
+    if reverse_dec:
+        degrees = 180 - degrees
+    return dec_to_steps(degrees)
+
+
 def time_to_degrees(hours, minutes, seconds):
     total_seconds = hours * 3600 + minutes * 60 + seconds
     normalized_seconds = total_seconds % (24 * 3600)
@@ -101,6 +122,14 @@ out.append('struct TimeDegCase { int h, m, s; double deg; };')
 out.append('static const TimeDegCase TIMEDEG_CASES[] = {')
 for h, m, s in [(0, 0, 0), (12, 30, 15), (23, 59, 59), (24, 0, 0), (25, 61, 61), (5, 35, 17)]:
     out.append(f'  {{{h}, {m}, {s}, {time_to_degrees(h, m, s)!r}}},')
+out += ['};', '']
+
+out.append('struct DecCase { double deg; int reverse; long steps; double back; };')
+out.append('static const DecCase DEC_CASES[] = {')
+for deg in [90, 0, -90, 45.5, -12.3456, 89.99, -89.99, 60.25] + [random.uniform(-90, 90) for _ in range(20)]:
+    for rev in (0, 1):
+        steps = set_dec_steps(deg, rev)
+        out.append(f'  {{{float(deg)!r}, {rev}, {steps}, {steps_to_normalized_dec(steps, rev)!r}}},')
 out += ['};', '']
 
 path = os.path.join(os.path.dirname(__file__), 'test_astro', 'golden.h')

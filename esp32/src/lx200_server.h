@@ -3,8 +3,7 @@
 
 // LX200 TCP server: port of lx200.py's LX200Proxy.process_command(), with the
 // same replies so existing INDI/Stellarium setups behave identically.
-// DEC is simulated for now (no DEC motor on the ESP yet): :GD reports the last
-// :Sd target once a slew or sync "reaches" it.
+// DEC commands drive the local stepper (dec_axis) with lx200.py's DEC logic.
 namespace lx200 {
 
 void begin();
@@ -13,7 +12,6 @@ String process(const String &cmd);  // one command, ":...#" (also used by tests/
 struct State {
   bool meridianFlipped;
   double raTarget;  // axis RA target after the meridian-flip adjustment
-  double decCurrent, decTarget;
   bool guideNorth, guideSouth;
   int clients;
 };

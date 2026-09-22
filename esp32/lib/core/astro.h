@@ -35,6 +35,17 @@ RaTarget selectTarget(double requestedRa, double lst, double offset);
 // RA reported to the client (get_ra / dashboard_ra_string)
 double reportedRa(double axisRa, bool flipped, double lst, double offset);
 
+// ---------------------------------------------------------------- DEC steps
+// lx200.py maps DEC -180..+180 onto 0..DEC_STEPS_PER_REV steps of the DEC motor
+// (step_per_rev_dec = 585600 / 2); 0 deg = 146400.
+constexpr long DEC_STEPS_PER_REV = 292800;
+
+long decToSteps(double deg);  // dec_to_steps()
+// steps_to_coord() before formatting; reverse = meridian_flipped ^ DEC_AXIS_REVERSED
+double stepsToDec(long steps, bool reverse);
+// set_dec(): the value handed to dec_to_steps() for a requested DEC
+double decForSteps(double requestedDeg, bool reverse);
+
 // ---------------------------------------------------------------- formatting
 
 void degToHms(double deg, int &h, int &m, int &s);  // degrees_to_hms (truncating)
