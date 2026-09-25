@@ -18,8 +18,8 @@ ra_extra = dec_cmd = 0.0
 for _ in range(N):
     d, ms = random.choice('nsew'), random.randint(100, 1200)
     lx.cmd(f':Mg{d}{ms}#')
-    if d in 'ew':  # east 1.5x, west 0.5x sidereal
-        ra_extra += (0.5 if d == 'e' else -0.5) * SIDEREAL_COUNTS * ms / 1000
+    if d in 'ew':  # west 1.5x, east 0.5x sidereal
+        ra_extra += (0.5 if d == 'w' else -0.5) * SIDEREAL_COUNTS * ms / 1000
     else:
         dec_cmd += (1 if d == 'n' else -1) * DEC_GUIDE_STEPS * ms / 1000
     time.sleep(ms / 1000 + random.uniform(0.3, 0.7))

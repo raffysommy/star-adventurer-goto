@@ -230,6 +230,70 @@ T1 and T2 are estimates on paper and need measuring. The magnetometer's remainin
 | Magnetometer (hard/soft iron) | Fully assembled rig turned through a full circle once, at a reference RA angle | When the box layout or site changes |
 | Magnetometer heading offset | Learned from each T3 run | Continuous |
 
+### Which side of the pole: one solve is enough
+
+The 360° DEC axis reaches every patch of sky on two branches: normal, or with DEC swung past the pole (after a meridian flip).
+- The two branches see the same sky **rotated by 180°**, so a single plate solve's field rotation tells them apart.
+  - On 2026-09-25 image +x pointed at position angle ≈ 1.3° on the normal branch. The other branch would read ≈ 181°.
+  - Remounting the camera a few degrees off each trip doesn't matter against 180°.
+- **Calibration:** once, the camera's rotation on the bracket, from a solve on a known branch.
+- **Check at every sync:** if the solve's rotation disagrees with the branch the ESP assumes, refuse the sync and say so. That's exactly the old beyond-the-pole failure, caught before the first wrong GoTo.
+- **Without sky:** the camera accelerometer does the same. On the two branches, for the same pointing, the camera is rolled 180°, so gravity sits on opposite sides of the camera frame.
+- The DEC-move test (the sign of ΔDec for +steps) also works, but costs a move and two solves.
+
+## RA register window (planned)
+
+**Today:** register = HA + 2° (`OFFSET`, from `offset_star_adventurer`), and GoTo/sync are limited to register 2°–183°.
+- This keeps clear of both register failures: below 0 tracking stalls, and above 241.7° the 24-bit value overflows.
+- The consequence is that only the western sky is reached directly. Everything east of the meridian is a meridian flip (RA +180°, DEC 180 − Dec).
+- The narrow window was chosen when a Raspberry Pi drove the mount over USB, for fear of overflow if the Pi disconnected while the mount kept tracking.
+
+**Why it can move now:**
+- The ESP is on the mount itself, sees the register continuously, and enforces limits at every poll.
+- If the ESP dies, the mount keeps tracking on its own at 15°/h. With the west limit kept ~59° below overflow, that still leaves the same ~4 h of margin as today.
+
+**Proposal (chosen: east limit −30°):**
+
+| | Now | Proposed |
+|---|---|---|
+| Register | HA + 2° | HA + 32° (east limit as a setting; register = HA − east limit + 2°) |
+| Normal branch (no flip) | target HA +0° … +181° | target HA **−30° … +150°** (register 2°–182°) |
+| Flipped branch | target HA −180° … 0° | target HA −210° … −30° |
+| Where the flip happens | at the meridian | 2 h **before** the meridian |
+| Margin to overflow at the west limit | 59° (~4 h) | 59° (~4 h) |
+
+**The window must stay 180° wide.**
+- The normal branch covers the axis window, and the flipped branch covers the same window shifted by 180°.
+- Narrower than 180°, some targets are reachable on neither branch. So the west limit moves with the east limit.
+
+**Behaviour:**
+- Every target crossing the sky still needs **one** flip somewhere, since the window is 180°. The offset only chooses **where**, and the flip point is the east limit.
+- With −30°, anything you start within 2 h before the meridian, or any time after it, never flips. That covers transit, the best part of the night.
+- A target started earlier (more than 2 h east) starts on the flipped branch and flips once, at HA −30° instead of at the meridian.
+- The flip itself is unchanged: a real GoTo to the other branch, triggered by the client re-slewing (NINA/Ekos "meridian flip" set to 2 h before the meridian, i.e. −30°).
+- **Missing today:** the RA limits are only checked on GoTo/sync. A tracking target keeps going past the west limit toward overflow (~4 h later). The ESP should stop tracking at the limit, or at least warn.
+
+**Before doing it:**
+- **East of the meridian on the normal branch, the camera sits below the RA head** (on a classic mount, the counterweight-up position). This is where the lens can hit the head or a tripod leg.
+  - So the east limit (−60°) must be a **setting**, set from a real clearance check with the rig.
+  - The collision limits below should exist first.
+- **Home at power-on** (register near 0 → "HA 2°") changes meaning. It must be restated for the new offset, or replaced by the IMU pose.
+- Update the golden tests (`test/gen_golden.py` uses lx200.py's offset) and the flip logic (`selectTarget`), and document it as a deliberate difference from lx200.py.
+
+## Collision limits
+
+Collisions are geometric: the lens or body against the SA head, the tripod legs, or the base box. They depend on the full mechanical pose (RA angle, DEC angle), not on which branch we're on.
+
+| Layer | How | Needs |
+|---|---|---|
+| **Configured limits** | Forbidden zones in mechanical coordinates (RA register, DEC motor angle). A GoTo whose path enters one is refused or rerouted | A one-time **teach**: move slowly toward each obstacle, press "mark limit" on the dashboard, and the ESP stores the counts, plus the IMU pose when there is one |
+| **Accelerometer** (camera) | Gives the camera's tilt directly: "lens pointing below −10°" or "camera upside down under the head" are simple, absolute rules. It works even when the counts are wrong (after a hand slew, a lost sync, a wrong branch) | Nothing beyond the planned MPU6500. It can't see rotation about the vertical, but the counts or the base IMU supply that |
+| **Gyro** (camera): stall or collision detection | During a slew the ESP knows the commanded rate (up to 0.28°/s RA, 870 steps/s DEC). If the gyro reads ~0 while the motor should be turning, something is blocking or slipping: stop within ~0.5 s | The same MPU6500. Only active during slews (guiding rates are far below the gyro noise) |
+| **Driver** (optional) | A TMC2209 with StallGuard on DEC | A driver swap |
+
+- **The IMU layers are a safety net for when the model is wrong.** A wrong sync, a wrong branch or a hand slew are exactly the cases where count-based limits fail.
+- The stop rules follow "When the IMU may act": stop at once during slews; during tracking, warn first and only stop at a hard limit.
+
 ## Hand-slew and push-to workflow
 
 1. Pick a target (e.g. Andromeda) on the phone dashboard.
@@ -305,6 +369,10 @@ Before any sensor work:
 1. **Read `/log` about the offline event;** check the power bank's behaviour and the 5 V rail.
 2. **Field networking:** decide whether the ESP joins the Pi's hotspot or the Pi joins the ESP's access point. The clock comes from the LX200 client or the browser until the GPS exists.
 3. **DEC soft limits** (configurable) and **power-loss detection** (untrusted position after a mid-session power-on).
+   - Collision limits by teach (counts first, the IMU later).
+   - A branch check from the solve's field rotation at every sync.
+   - Then the **RA register window** move (HA −30°…+150°), after a clearance check east of the meridian.
+   - Stop tracking at the west RA limit (today only GoTo/sync are checked).
 4. **Night test** with INDI "LX200 GPS" + PHD2, watching:
    - the meridian flip (now at the true meridian)
    - the `"0"` reply to `:Mg`

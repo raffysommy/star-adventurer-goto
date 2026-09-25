@@ -19,7 +19,7 @@ void begin();
 void gotoRa(double axisRa);  // :MS  (slew at max speed, then resume tracking)
 void stop();                 // :Q   (abort slew / end guiding / restart tracking)
 void sync(double axisRa);    // :CM  (position register := HA(axisRa))
-void guide(char dir, int ms);  // 'e' = 1.5x, 'w' = 0.5x sidereal; ms <= 0 until stop()
+void guide(char dir, int ms);  // 'w' = 1.5x, 'e' = 0.5x sidereal; ms <= 0 until stop()
 void setHome();              // register := OFFSET (mount at its home position)
 void setRegister(double ha); // debug: redefine the current position (no motion)
 void gotoHa(double ha);      // debug: slew to a fixed register angle

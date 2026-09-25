@@ -132,6 +132,8 @@ push-to, pier side, safety limits), plus fast polar alignment in tiers from sky-
   Meade sign convention.
 - `:MS`/`:CM` without a prior valid `:Sr` don't move or sync RA.
 - DEC guide pulses are exact step counts, not timed stops (those overshot by the queued steps).
+- RA guide/slow-move directions follow ASCOM/EQMOD: west = 1.5×, east = 0.5× sidereal (`lx200.py`
+  had them swapped). Redo PHD2 calibration made with the old firmware.
 - DEC guide rate is 0.5× sidereal (1.7 steps/s). `lx200.py`'s "sidereal" 6.796 steps/s was really 2×.
 - DEC backlash is compensated (below), and DEC GoTos always end moving north (+steps).
 - The RA register survives ESP restarts (read back from the mount). The DEC position survives soft

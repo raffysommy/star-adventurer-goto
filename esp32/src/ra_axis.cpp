@@ -292,7 +292,9 @@ static void handle(const Cmd &c) {
       bool east = c.dir == 'e';
       st.guideEast = east;
       st.guideWest = !east;
-      trackT1 = sw::t1ForRate(params, (east ? 1.5 : 0.5) * SIDEREAL);  // slew_ra_east / slew_ra_west
+      // ASCOM/EQMOD convention: west = the scope moves west with the sky = faster.
+      // lx200.py had it the other way round (measured on the sky 2026-09-25).
+      trackT1 = sw::t1ForRate(params, (east ? 0.5 : 1.5) * SIDEREAL);
       sw::setT1(AXIS, trackT1);
       setPhase("guiding");
       esp_timer_stop(guideTimer);
