@@ -136,6 +136,15 @@ push-to, pier side, safety limits), plus fast polar alignment in tiers from sky-
   had them swapped). Redo PHD2 calibration made with the old firmware.
 - DEC guide rate is 0.5× sidereal (1.7 steps/s). `lx200.py`'s "sidereal" 6.796 steps/s was really 2×.
 - DEC backlash is compensated (below), and DEC GoTos always end moving north (+steps).
+- **RA window and flip.** The register window starts at a configurable east limit (dashboard, NVS
+  `ra_east`, default 0 = `lx200.py`'s flip at the meridian; −30 = flip 2 h before it). register =
+  HA − east limit + 2°. GoTos use the window [2°, 182°] on either branch (`lx200.py` flipped at 180,
+  leaving a 2° dead zone). Tracking goes on past the window and **stops at register 235°**, before
+  the 24-bit overflow. Changing the east limit shifts the register so the position keeps its meaning.
+- **Branch choice happens at use, not at `:Sr`.** `:MS` takes the window's branch, and `:CM` keeps
+  the branch nearest the current register (a sync doesn't move the mount). Before, a sync past the
+  window flipped the maths without moving: the old beyond-the-pole bug. DEC steps are computed then
+  too, so the `:Sr`/`:Sd` order doesn't matter. The flip flag survives OTA and crash resets.
 - The RA register survives ESP restarts (read back from the mount). The DEC position survives soft
   resets and OTA (kept in RAM). After a power-on DEC starts at 0° (146400 steps), as `lx200.py` did.
 

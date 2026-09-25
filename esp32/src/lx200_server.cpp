@@ -2,6 +2,8 @@
 
 #include <WiFi.h>
 #include <astro.h>
+#include <esp_attr.h>
+#include <esp_system.h>
 #include <esp_timer.h>
 
 #include "clock.h"
@@ -17,6 +19,20 @@ static const int MAX_CLIENTS = 2;
 static SemaphoreHandle_t lock;  // process() can be called from the server task and the web UI
 static State st = {false, 0, false, false, 0};
 static bool targetValid = false;  // no :MS / :CM before a successful :Sr
+static bool decValid = false;
+// :Sr / :Sd only store the request; the branch (meridian flip) is chosen when it's
+// used: :MS takes the GoTo window, :CM keeps the branch the mount is physically on.
+static double reqRa, reqDec;
+
+// The branch must survive OTA/crash resets like the RA register and the DEC position
+// do, or the ESP would come back on the wrong side of the pole
+__NOINIT_ATTR static uint32_t savedFlipped;
+static const uint32_t FLIP_MAGIC = 0x464C5000;  // | flipped bit
+
+static void setFlipped(bool f) {
+  st.meridianFlipped = f;
+  savedFlipped = FLIP_MAGIC | (f ? 1 : 0);
+}
 static esp_timer_handle_t decGuideTimer;
 
 // ---------------------------------------------------------------- helpers
@@ -29,7 +45,7 @@ static String fmtRa(double deg) {
 
 String reportedRa() {
   ra::State r = ra::state();
-  return fmtRa(astro::reportedRa(r.axisRa, st.meridianFlipped, ra::lst(), ra::OFFSET));
+  return fmtRa(astro::reportedRa(r.axisRa, st.meridianFlipped, ra::lst(), ra::offset()));
 }
 
 static bool reverseDec() { return st.meridianFlipped ^ settings.decAxisReversed; }
@@ -87,6 +103,15 @@ static String slowMove(const String &cmd) {
   return "0";
 }
 
+// set_dec(): beyond the pole the axis goes to 180 - dec. Computed when used, with
+// the branch just chosen, so the order of :Sr and :Sd doesn't matter.
+static void setDecTarget() {
+  if (!decValid) return;
+  long steps = astro::decToSteps(astro::decForSteps(reqDec, reverseDec()));
+  dec::setTarget(steps);
+  logf("lx200: DEC %.4f -> %ld steps%s", reqDec, steps, reverseDec() ? " (reversed)" : "");
+}
+
 // ---------------------------------------------------------------- commands
 
 String process(const String &cmd) {
@@ -113,21 +138,17 @@ String process(const String &cmd) {
   } else if (cmd.startsWith(":GVF")) {
     r = "11#";
   } else if (cmd.startsWith(":Sr")) {
-    // set_ra(): pick the meridian-flipped target now, as lx200.py does
     if (astro::parseSr(c, v)) {
-      astro::RaTarget t = astro::selectTarget(v, ra::lst(), ra::OFFSET);
-      st.meridianFlipped = t.flipped;
-      st.raTarget = t.ra;
+      reqRa = v;
       targetValid = true;
-      logf("lx200: target RA %.4f -> axis RA %.4f%s", v, t.ra, t.flipped ? " (meridian flipped)" : "");
+      logf("lx200: target RA %.4f", v);
       r = "#";
     }
   } else if (cmd.startsWith(":Sd")) {
-    // set_dec(): beyond the pole the axis goes to 180 - dec
     if (astro::parseSd(c, v)) {
-      long steps = astro::decToSteps(astro::decForSteps(v, reverseDec()));
-      dec::setTarget(steps);
-      logf("lx200: target DEC %.4f -> %ld steps%s", v, steps, reverseDec() ? " (reversed)" : "");
+      reqDec = v;
+      decValid = true;
+      logf("lx200: target DEC %.4f", v);
       r = "#";
     }
   } else if (cmd.startsWith(":MS")) {
@@ -135,9 +156,15 @@ String process(const String &cmd) {
       logf("lx200: :MS without a target, ignored");
       r = "1No target#";
     } else {
-      ra::gotoRa(st.raTarget);
+      // set_ra(): targets past the window are reached through the pole
+      astro::RaTarget t = astro::selectTarget(reqRa, ra::lst(), ra::offset());
+      setFlipped(t.flipped);
+      st.raTarget = t.ra;
+      logf("lx200: goto RA %.4f -> axis RA %.4f%s", reqRa, t.ra, t.flipped ? " (meridian flipped)" : "");
+      ra::gotoRa(t.ra);
       r = "0";
     }
+    setDecTarget();
     dec::slew();
   } else if (cmd.startsWith(":M")) {
     r = slowMove(cmd);
@@ -148,8 +175,22 @@ String process(const String &cmd) {
     dec::stop();
     r = "";
   } else if (cmd.startsWith(":CM")) {
-    if (targetValid) ra::sync(st.raTarget);
-    else logf("lx200: :CM without an RA target, RA not synced");
+    if (targetValid) {
+      bool ok;
+      ra::State rs = ra::state();
+      astro::RaTarget t = astro::selectSyncTarget(reqRa, ra::lst(), ra::offset(), rs.axisHa, ra::TRACK_MAX, ok);
+      if (ok) {
+        if (t.flipped != st.meridianFlipped) logf("lx200: sync on the %s branch", t.flipped ? "flipped" : "normal");
+        setFlipped(t.flipped);
+        st.raTarget = t.ra;
+        ra::sync(t.ra);
+      } else {
+        logf("lx200: sync RA %.4f REFUSED, outside the register range on both branches", reqRa);
+      }
+    } else {
+      logf("lx200: :CM without an RA target, RA not synced");
+    }
+    setDecTarget();
     dec::syncToTarget();
     r = ":Coordinates matched #";
   } else if (cmd.startsWith(":D")) {
@@ -276,6 +317,9 @@ static void serverTask(void *) {
 
 void begin() {
   lock = xSemaphoreCreateMutex();
+  bool kept = esp_reset_reason() != ESP_RST_POWERON && (savedFlipped & ~1u) == FLIP_MAGIC;
+  setFlipped(kept && (savedFlipped & 1));
+  if (kept && st.meridianFlipped) logf("lx200: meridian flipped (kept across reset)");
   esp_timer_create_args_t args = {};
   args.callback = decGuideEnd;
   args.name = "dec_guide";

@@ -241,7 +241,7 @@ The 360° DEC axis reaches every patch of sky on two branches: normal, or with D
 - **Without sky:** the camera accelerometer does the same. On the two branches, for the same pointing, the camera is rolled 180°, so gravity sits on opposite sides of the camera frame.
 - The DEC-move test (the sign of ΔDec for +steps) also works, but costs a move and two solves.
 
-## RA register window (planned)
+## RA register window (implemented 2026-09-26, east limit still 0 until the clearance check)
 
 **Today:** register = HA + 2° (`OFFSET`, from `offset_star_adventurer`), and GoTo/sync are limited to register 2°–183°.
 - This keeps clear of both register failures: below 0 tracking stalls, and above 241.7° the 24-bit value overflows.
@@ -271,7 +271,10 @@ The 360° DEC axis reaches every patch of sky on two branches: normal, or with D
 - With −30°, anything you start within 2 h before the meridian, or any time after it, never flips. That covers transit, the best part of the night.
 - A target started earlier (more than 2 h east) starts on the flipped branch and flips once, at HA −30° instead of at the meridian.
 - The flip itself is unchanged: a real GoTo to the other branch, triggered by the client re-slewing (NINA/Ekos "meridian flip" set to 2 h before the meridian, i.e. −30°).
-- **Missing today:** the RA limits are only checked on GoTo/sync. A tracking target keeps going past the west limit toward overflow (~4 h later). The ESP should stop tracking at the limit, or at least warn.
+- **Tracking past the window** (implemented): tracking continues to register 235° and stops there. A flipped-branch target can track from 2 h before the meridian to ~1.5 h after it, and you flip (re-slew) whenever it suits you.
+- **Overflow margin:** the mount is powered from the ESP's OTG port, so it can't keep tracking with the ESP dead. The 4 h margin is no longer needed.
+- **The register limit could go entirely:** a software offset, with a ~1 s pause between subs to shift the register back near the end of the span. The only limits would then be collisions and cables.
+- **Sync keeps the branch** (implemented): `:CM` picks the candidate nearest the current register, so solve → sync → GoTo ("center") never flips the maths without a move.
 
 **Before doing it:**
 - **East of the meridian on the normal branch, the camera sits below the RA head** (on a classic mount, the counterweight-up position). This is where the lens can hit the head or a tripod leg.
@@ -371,8 +374,8 @@ Before any sensor work:
 3. **DEC soft limits** (configurable) and **power-loss detection** (untrusted position after a mid-session power-on).
    - Collision limits by teach (counts first, the IMU later).
    - A branch check from the solve's field rotation at every sync.
-   - Then the **RA register window** move (HA −30°…+150°), after a clearance check east of the meridian.
-   - Stop tracking at the west RA limit (today only GoTo/sync are checked).
+   - **RA register window** (HA −30°…+150°) and the stop at the tracking limit: done 2026-09-26. Set the east limit to −30 on the dashboard after a clearance check on **both** sides: camera under the head east of the meridian, and on the flipped branch past it.
+   - Log the reset reason to NVS: on 2026-09-26 an OTA attempt apparently power-cycled the mount (it came back fresh after only a software reset), and a power-on wipes the RAM log.
 4. **Night test** with INDI "LX200 GPS" + PHD2, watching:
    - the meridian flip (now at the true meridian)
    - the `"0"` reply to `:Mg`

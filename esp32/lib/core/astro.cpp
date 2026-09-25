@@ -30,21 +30,41 @@ double gmstDeg(double unixUtc) {
 
 double lstDeg(double unixUtc, double lonEast) { return wrap360(gmstDeg(unixUtc) + lonEast); }
 
-// get_hour_angle(): note the offset is added after the modulo, as in lx200.py
-double hourAngle(double raDeg, double lst, double offset) { return wrap360(lst - raDeg) + offset; }
+// get_hour_angle(), generalized: with offset == MARGIN this is lx200.py's
+// (LST - RA) % 360 + offset
+double hourAngle(double raDeg, double lst, double offset) { return wrap360(lst - raDeg + offset - MARGIN) + MARGIN; }
 
 double rightAscension(double haDeg, double lst, double offset) { return wrap360(lst - (haDeg - offset)); }
 
 RaTarget selectTarget(double requestedRa, double lst, double offset) {
   RaTarget t;
-  if (hourAngle(requestedRa, lst, offset) > 180) {
+  if (hourAngle(requestedRa, lst, offset) > WINDOW_MAX) {
     t.flipped = true;
-    t.ra = rightAscension(wrap360(hourAngle(requestedRa + 180, lst, offset)), lst, offset);
+    t.ra = wrap360(requestedRa + 180);
   } else {
     t.flipped = false;
     t.ra = requestedRa;
   }
   return t;
+}
+
+RaTarget selectSyncTarget(double requestedRa, double lst, double offset, double currentRegister, double trackMax,
+                          bool &ok) {
+  RaTarget c[2] = {{requestedRa, false}, {wrap360(requestedRa + 180), true}};
+  ok = false;
+  RaTarget best = c[0];
+  double bestDist = 1e9;
+  for (const RaTarget &t : c) {
+    double reg = hourAngle(t.ra, lst, offset);
+    if (reg < MARGIN || reg > trackMax) continue;
+    double d = fabs(reg - currentRegister);
+    if (d < bestDist) {
+      bestDist = d;
+      best = t;
+      ok = true;
+    }
+  }
+  return best;
 }
 
 double reportedRa(double axisRa, bool flipped, double lst, double offset) {

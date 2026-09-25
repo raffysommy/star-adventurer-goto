@@ -2,10 +2,13 @@
 // Pure mount math, ported from lx200.py. No Arduino dependencies: unit-tested on
 // the host with `pio test -e native` against Python/ephem golden values.
 //
-// Angles are in degrees. RA/HA follow lx200.py's conventions:
-//   HA = (LST - RA) % 360 + offset      RA = (LST - (HA - offset)) % 360
-// where offset (offset_star_adventurer, 2 deg) keeps the mount's position register
-// away from zero, which the Star Adventurer firmware cannot cross.
+// Angles are in degrees. "HA" here is the mount's register angle:
+//   register = (LST - RA + offset - MARGIN) % 360 + MARGIN   RA = (LST - (register - offset)) % 360
+// i.e. register = hour angle + offset, wrapped into [MARGIN, 360 + MARGIN).
+// offset = MARGIN - east limit: with the east limit at 0 (offset 2, lx200.py's
+// offset_star_adventurer) this is exactly lx200.py's formula; a negative east limit
+// (e.g. -30: offset 32) moves the register window east of the meridian. MARGIN keeps
+// the register away from zero, which the Star Adventurer firmware cannot cross.
 //
 // Unlike lx200.py, LST here is computed correctly: UTC time and longitude in
 // degrees (lx200.py feeds ephem local time and a longitude it reads as radians).
@@ -21,16 +24,27 @@ double julianDate(double unixUtc);
 double gmstDeg(double unixUtc);
 double lstDeg(double unixUtc, double lonEast);
 
+constexpr double MARGIN = 2.0;       // lowest register angle used
+constexpr double WINDOW_MAX = 182.0;  // GoTo window: register [MARGIN, WINDOW_MAX] on both branches
+
 double hourAngle(double raDeg, double lst, double offset);
 double rightAscension(double haDeg, double lst, double offset);
 
-// :Sr target handling (LX200Proxy.set_ra): targets beyond HA 180 are reached
-// "through the pole" with the meridian_flipped flag set.
+// GoTo target (LX200Proxy.set_ra): targets past the window are reached "through the
+// pole" (axis RA + 180, DEC 180 - dec) with the meridian_flipped flag set. Unlike
+// lx200.py (threshold 180) the threshold is WINDOW_MAX, so no target lands below MARGIN.
 struct RaTarget {
   double ra;     // RA the mount axis is actually driven to
   bool flipped;  // meridian_flipped
 };
 RaTarget selectTarget(double requestedRa, double lst, double offset);
+
+// Sync target: a sync doesn't move the mount, so it must keep the branch the mount
+// is physically on. Of the two candidates, those with a register in [MARGIN, trackMax]
+// are valid; the one nearest the current register wins (a real sync correction is
+// small, the other branch is ~180 deg away). ok = false if neither is valid.
+RaTarget selectSyncTarget(double requestedRa, double lst, double offset, double currentRegister, double trackMax,
+                          bool &ok);
 
 // RA reported to the client (get_ra / dashboard_ra_string)
 double reportedRa(double axisRa, bool flipped, double lst, double offset);

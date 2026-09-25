@@ -2,6 +2,8 @@
 #include <string.h>
 #include <unity.h>
 
+#include <initializer_list>
+
 #include "astro.h"
 #include "golden.h"
 
@@ -43,6 +45,57 @@ void test_meridian_flip_matches_lx200() {
     TEST_ASSERT_DOUBLE_WITHIN(1e-9, c.ra, t.ra);
     TEST_ASSERT_DOUBLE_WITHIN(1e-9, c.reported, reportedRa(t.ra, t.flipped, c.lst, OFFSET));
   }
+}
+
+// East limit -30 deg: register = HA + 32, window HA -30..+150 on the normal branch
+void test_east_limit_window() {
+  const double off = MARGIN + 30, lst = 100;
+  TEST_ASSERT_DOUBLE_WITHIN(1e-9, 2, hourAngle(lst + 30, lst, off));    // HA -30 -> window start
+  TEST_ASSERT_DOUBLE_WITHIN(1e-9, 32, hourAngle(lst, lst, off));        // meridian
+  TEST_ASSERT_DOUBLE_WITHIN(1e-9, 182, hourAngle(lst - 150, lst, off)); // HA +150 -> window end
+  TEST_ASSERT_DOUBLE_WITHIN(1e-9, 361, hourAngle(lst + 31, lst, off));  // HA -31 wraps high
+  // every requested RA lands in [MARGIN, WINDOW_MAX] on one branch, and round-trips
+  for (double req = 0; req < 360; req += 0.25) {
+    for (double o : {MARGIN, MARGIN + 30, MARGIN + 60}) {
+      RaTarget t = selectTarget(req, lst, o);
+      double reg = hourAngle(t.ra, lst, o);
+      TEST_ASSERT_TRUE_MESSAGE(reg >= MARGIN && reg <= WINDOW_MAX, "target outside the GoTo window");
+      TEST_ASSERT_TRUE(angDiff(reportedRa(t.ra, t.flipped, lst, o), req) < 1e-9);
+      TEST_ASSERT_TRUE(angDiff(rightAscension(reg, lst, o), t.ra) < 1e-9);
+    }
+  }
+  // meridian and 2 h east: no flip with -30; flip just beyond -30
+  TEST_ASSERT_FALSE(selectTarget(lst, lst, off).flipped);
+  TEST_ASSERT_FALSE(selectTarget(lst + 29.9, lst, off).flipped);
+  TEST_ASSERT_TRUE(selectTarget(lst + 30.1, lst, off).flipped);
+  // the old window (east limit 0) flips east of the meridian
+  TEST_ASSERT_TRUE(selectTarget(lst + 1, lst, MARGIN).flipped);
+}
+
+// A sync keeps the branch the mount is on, even past the GoTo window
+void test_sync_keeps_branch() {
+  const double off = MARGIN + 30, lst = 100, trackMax = 235;
+  bool ok;
+  // flipped target tracked 1 h past the meridian: register ~ 32 + 180 + 15 = 227
+  RaTarget t = selectSyncTarget(lst - 15, lst, off, 227, trackMax, ok);
+  TEST_ASSERT_TRUE(ok);
+  TEST_ASSERT_TRUE(t.flipped);                 // selectTarget would say normal branch
+  TEST_ASSERT_FALSE(selectTarget(lst - 15, lst, off).flipped);
+  TEST_ASSERT_DOUBLE_WITHIN(0.01, 227, hourAngle(t.ra, lst, off));
+  // same RA, mount on the normal branch (register 47): stays normal
+  t = selectSyncTarget(lst - 15, lst, off, 47, trackMax, ok);
+  TEST_ASSERT_TRUE(ok);
+  TEST_ASSERT_FALSE(t.flipped);
+  // fresh mount (register at home) agrees with the GoTo choice (off the exact
+  // window edge, where either branch is fine)
+  for (double req = 0.5; req < 360; req += 1) {
+    t = selectSyncTarget(req, lst, off, off, trackMax, ok);
+    TEST_ASSERT_TRUE(ok);
+    TEST_ASSERT_EQUAL_INT(selectTarget(req, lst, off).flipped, t.flipped);
+  }
+  // past the tracking limit on both branches: refused
+  selectSyncTarget(lst - 239, lst, MARGIN, 100, trackMax, ok);  // registers 241 and 61 -> 61 valid
+  TEST_ASSERT_TRUE(ok);
 }
 
 void test_hms_matches_lx200() {
@@ -125,6 +178,8 @@ int main() {
   RUN_TEST(test_lst_matches_ephem);
   RUN_TEST(test_hour_angle_matches_lx200);
   RUN_TEST(test_meridian_flip_matches_lx200);
+  RUN_TEST(test_east_limit_window);
+  RUN_TEST(test_sync_keeps_branch);
   RUN_TEST(test_hms_matches_lx200);
   RUN_TEST(test_dec_steps_match_lx200);
   RUN_TEST(test_parse_and_format);

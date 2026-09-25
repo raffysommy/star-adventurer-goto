@@ -22,7 +22,7 @@ static const double APPROACH_RATE = 8;       // x sidereal
 static const uint32_t SLEW_TIMEOUT_MS = 20 * 60 * 1000;
 
 
-enum CmdType { GOTO, GOTO_HA, STOP, SYNC, GUIDE, GUIDE_END, HOME, SET_REGISTER };
+enum CmdType { GOTO, GOTO_HA, STOP, SYNC, GUIDE, GUIDE_END, HOME, SET_REGISTER, EAST_LIMIT };
 struct Cmd {
   CmdType type;
   double value;
@@ -31,7 +31,7 @@ struct Cmd {
   uint32_t seq;
 };
 
-enum Mode { DISCONNECTED, TRACK, SLEW };
+enum Mode { DISCONNECTED, TRACK, SLEW, HALT };  // HALT: stopped at TRACK_MAX
 
 static QueueHandle_t queue;
 static SemaphoreHandle_t stateLock;
@@ -55,10 +55,12 @@ static struct {
 
 double lst() { return astro::lstDeg(clockNow(), settings.lonEast); }
 
-static double hourAngle(double raDeg) { return astro::hourAngle(raDeg, lst(), OFFSET); }
+double offset() { return astro::MARGIN - settings.raEastLimit; }
+
+static double hourAngle(double raDeg) { return astro::hourAngle(raDeg, lst(), offset()); }
 
 static double axisRaFromCounts(long counts) {
-  return astro::rightAscension(sw::countsToDeg(params, counts), lst(), OFFSET);
+  return astro::rightAscension(sw::countsToDeg(params, counts), lst(), offset());
 }
 
 static void setPhase(const char *phase) {
@@ -114,8 +116,8 @@ static void onConnect() {
   // 0 by the time we look); anything else means only the ESP restarted (e.g. OTA)
   // and the register still holds a valid sync.
   if (labs(counts) < sw::degToCounts(params, 1.0)) {
-    sw::setPos(AXIS, sw::degToCounts(params, OFFSET));
-    logf("ra: fresh mount, register set to home (HA %.1f deg)", OFFSET);
+    sw::setPos(AXIS, sw::degToCounts(params, offset()));
+    logf("ra: fresh mount, register set to home (HA 0, register %.1f deg)", offset());
   } else {
     logf("ra: keeping position register (%.3f deg)", sw::countsToDeg(params, counts));
   }
@@ -132,7 +134,7 @@ static void onConnect() {
 static double targetHa() { return slew.targetIsHa ? slew.target : hourAngle(slew.target); }
 
 // Distance to go, from the raw register (lx200.py wraps HA(current) through RA,
-// which misbehaves once the register leaves [OFFSET, 360 + OFFSET))
+// which misbehaves once the register leaves its wrap window)
 static double slewDistance(long counts) { return sw::countsToDeg(params, counts) - targetHa(); }
 
 static void finishSlew(const char *why, double d) {
@@ -213,6 +215,18 @@ static void slewStep(long counts) {
 // Only if the position still doesn't advance is the full stop/G/I/J sequence used.
 static void trackStep(long counts) {
   uint32_t now = millis();
+  // Past TRACK_MAX the register would soon overflow: stop instead of tracking on.
+  // A GoTo (into the window, possibly flipping) or a sync takes it from here.
+  if (sw::countsToDeg(params, counts) > TRACK_MAX) {
+    sw::stopSoft(AXIS);
+    sw::waitStopped(AXIS);
+    st.guideEast = st.guideWest = false;
+    trackT1 = siderealT1;
+    mode = HALT;
+    setPhase("limit");
+    logf("ra: tracking STOPPED at the RA limit (register %.3f > %.0f deg)", sw::countsToDeg(params, counts), TRACK_MAX);
+    return;
+  }
   if (now - lastRunCheckMs >= RUN_CHECK_MS) {
     lastRunCheckMs = now;
     sw::Status s;
@@ -260,8 +274,8 @@ static void handle(const Cmd &c) {
     case SYNC: {
       if (!clockValid()) logf("ra: WARNING clock not set, sync will be wrong");
       double ha = hourAngle(c.value);
-      if (ha < HA_MIN || ha > HA_MAX) {
-        logf("ra: sync REFUSED, HA %.3f outside [%.0f, %.0f]", ha, HA_MIN, HA_MAX);
+      if (ha < HA_MIN || ha > TRACK_MAX) {
+        logf("ra: sync REFUSED, HA %.3f outside [%.0f, %.0f]", ha, HA_MIN, TRACK_MAX);
         break;
       }
       if (mode == SLEW) finishSlew("aborted by sync", 0);
@@ -280,11 +294,33 @@ static void handle(const Cmd &c) {
       else logf("ra: register value %.4f deg REFUSED", c.value);
       startTracking();
       break;
+    case EAST_LIMIT: {
+      if (mode == SLEW) {
+        logf("ra: east limit change REFUSED during a slew");
+        break;
+      }
+      long counts;
+      if (!sw::getPos(AXIS, counts)) break;
+      double delta = c.value - settings.raEastLimit;  // register = HA - eastLimit + MARGIN
+      double reg = sw::countsToDeg(params, counts) - delta;
+      if (reg < 0.5 || reg > TRACK_MAX) {
+        logf("ra: east limit %.1f REFUSED, register would be %.3f deg", c.value, reg);
+        break;
+      }
+      sw::stopSoft(AXIS);
+      sw::waitStopped(AXIS);
+      sw::setPos(AXIS, sw::degToCounts(params, reg));
+      settings.raEastLimit = c.value;
+      settingsSave();
+      logf("ra: east limit %.1f deg (offset %.1f), register shifted to %.3f deg", c.value, offset(), reg);
+      startTracking();
+      break;
+    }
     case HOME:
       sw::stopSoft(AXIS);
       sw::waitStopped(AXIS);
-      sw::setPos(AXIS, sw::degToCounts(params, OFFSET));
-      logf("ra: register set to home (HA %.1f deg)", OFFSET);
+      sw::setPos(AXIS, sw::degToCounts(params, offset()));
+      logf("ra: register set to home (HA 0, register %.1f deg)", offset());
       startTracking();
       break;
     case GUIDE: {
@@ -336,7 +372,7 @@ static void task(void *) {
     st.axisRa = axisRaFromCounts(counts);
     xSemaphoreGive(stateLock);
     if (mode == SLEW) slewStep(counts);
-    else trackStep(counts);
+    else if (mode == TRACK) trackStep(counts);
   }
 }
 
@@ -366,6 +402,17 @@ void guide(char dir, int ms) { post(GUIDE, 0, dir, ms); }
 void setHome() { post(HOME); }
 void setRegister(double ha) { post(SET_REGISTER, ha); }
 void gotoHa(double ha) { post(GOTO_HA, ha); }
+
+void setEastLimit(double deg) {
+  deg = constrain(deg, -90.0, 0.0);
+  if (!state().connected) {  // mount off: its register restarts at home anyway
+    settings.raEastLimit = deg;
+    settingsSave();
+    logf("ra: east limit %.1f deg (mount not connected)", deg);
+    return;
+  }
+  post(EAST_LIMIT, deg);
+}
 
 State state() {
   xSemaphoreTake(stateLock, portMAX_DELAY);

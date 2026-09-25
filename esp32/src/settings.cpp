@@ -16,6 +16,7 @@ void settingsLoad() {
   settings.pierEast = p.getBool("pier_east", d.pierEast);
   settings.lx200Port = p.getUShort("lx_port", d.lx200Port);
   settings.decBacklash = p.getInt("dec_bl", d.decBacklash);
+  settings.raEastLimit = p.getDouble("ra_east", d.raEastLimit);
   p.end();
 }
 
@@ -30,5 +31,6 @@ void settingsSave() {
   p.putBool("pier_east", settings.pierEast);
   p.putUShort("lx_port", settings.lx200Port);
   p.putInt("dec_bl", settings.decBacklash);
+  p.putDouble("ra_east", settings.raEastLimit);
   p.end();
 }
