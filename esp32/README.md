@@ -106,10 +106,11 @@ Design rules:
   `J`, never a stop/restart.
 - **Cores:** Wi-Fi, lwIP and USB host on core 0; RA/DEC/LX200 on core 1. DEC step pulses come from hardware.
 
-Planned additions: GPS (UART; time and site), a 9-axis IMU on the battery pack (polar axis
-altitude/heading), a 6-axis IMU on the camera (absolute pointing sanity checks, rough
-initial sync), all feeding `clock`/`settings` and a pointing-check module; optionally the
-OAT protocol front-end.
+Planned additions: GPS (time, site, magnetic declination), a 9-axis IMU in the base box
+(polar axis altitude and heading) and a 6-axis IMU on the camera hot shoe (mechanical pose,
+push-to, pier side, safety limits), plus fast polar alignment in tiers from sky-less
+(~0.5–1°) to two plate solves (~1′). The design is in
+[docs/sensors-and-alignment.md](docs/sensors-and-alignment.md).
 
 ## Star Adventurer firmware quirks (measured)
 
