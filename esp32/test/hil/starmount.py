@@ -50,8 +50,10 @@ def post(path, **data):
 class LX200:
     """Minimal LX200/OnStep client. Replies follow OnStepX: set commands answer a
     single '1'/'0' (NO_HASH), moves, stops and pulses answer nothing (NO_REPLY)."""
-    NO_HASH = (':Sr', ':Sd', ':Sg', ':St', ':MS', ':SL', ':SC', ':SG', ':Te', ':Td', ':hR')
-    NO_REPLY = (':Q', ':R', ':U', ':Mg', ':Mn', ':Ms', ':Me', ':Mw')
+    NO_HASH = (':Sr', ':Sd', ':Sg', ':St', ':MS', ':SL', ':SC', ':SG', ':Sh', ':So', ':ST', ':SX', ':T',
+               ':hR', ':$B')
+    NO_REPLY = (':Q', ':R', ':U', ':Mg', ':Mn', ':Ms', ':Me', ':Mw', ':WR', ':CS', ':$QZ+', ':$QZ-', ':$QZ/',
+                ':$QZZ', ':$QZ!')
 
     def __init__(self):
         self.s = _connect(LX200_PORT, timeout=2)

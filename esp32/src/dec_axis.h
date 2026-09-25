@@ -16,7 +16,6 @@ namespace dec {
 
 // lx200.py called 6.796 steps/s "sidereal"; it is really 2x sidereal
 constexpr float SIDEREAL_STEPS = astro::DEC_STEPS_PER_REV / 360.0 * 360.9856 / 86400;  // 3.398
-constexpr float GUIDE_SPEED = SIDEREAL_STEPS * 0.5;  // :Mn / :Ms / pulses, as RA's 0.5x
 constexpr float SLEW_SPEED = SIDEREAL_STEPS * 256;   // :MS and backlash take-up (870 steps/s)
 constexpr long GOTO_OVERSHOOT = 100;                 // steps past a target reached moving backward
 
@@ -26,13 +25,18 @@ void setTarget(long steps);  // :Sd
 void slew();                 // :MS  move to the target
 void stop();                 // :Q
 void guide(int dir);         // :Mn (+1) / :Ms (-1): move at guide speed until stop()
-// :Mgn / :Mgs pulse: exactly GUIDE_SPEED * ms steps (fractions carried over to the
+// :Mgn / :Mgs pulse: exactly guide speed * ms steps (fractions carried over to the
 // next pulse), instead of a timed stop that would let queued steps overshoot
 void guidePulse(int dir, int ms);
 void syncToTarget();         // :CM  current position := target
 // :CP (pier east side). atBoot: the saved position was taken with this direction already
 void setInverted(bool inv, bool atBoot = false);
 void setBacklash(long steps);
+void setGuideRate(float xSidereal);  // :Mn / :Ms / pulses (settings.guideRate)
+// Mechanical limits in gear-position steps: GoTos past them are refused, moves and
+// pulses stop at them
+void setLimits(long minSteps, long maxSteps);
+bool withinLimits(long steps);
 
 long position();             // gear output position
 long motorPosition();

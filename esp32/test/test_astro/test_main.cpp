@@ -1,10 +1,13 @@
 #include <math.h>
+#include <stdio.h>
 #include <string.h>
 #include <unity.h>
 
 #include <initializer_list>
 
 #include "astro.h"
+#include "nmea.h"
+#include "pec.h"
 #include "golden.h"
 
 using namespace astro;
@@ -162,6 +165,94 @@ void test_onstep_formatting() {
   TEST_ASSERT_DOUBLE_WITHIN(1e-5, 123.456789, v);
 }
 
+void test_nmea() {
+  // the classic reference sentences (valid checksums)
+  const char *rmc = "$GPRMC,123519,A,4807.038,N,01131.000,E,022.4,084.4,230394,003.1,W*6A";
+  const char *gga = "$GPGGA,123519,4807.038,N,01131.000,E,1,08,0.9,545.4,M,46.9,M,,*47";
+  nmea::Fix f;
+  TEST_ASSERT_TRUE(nmea::checksumOk(rmc));
+  TEST_ASSERT_TRUE(nmea::parse(rmc, f));
+  TEST_ASSERT_TRUE(f.timeValid);
+  TEST_ASSERT_EQUAL_INT64(764426119, f.unixUtc);  // 1994-03-23 12:35:19 UTC
+  TEST_ASSERT_DOUBLE_WITHIN(1e-6, 48.1173, f.lat);
+  TEST_ASSERT_DOUBLE_WITHIN(1e-6, 11.516666667, f.lon);
+  TEST_ASSERT_TRUE(nmea::parse(gga, f));
+  TEST_ASSERT_TRUE(f.posValid);
+  TEST_ASSERT_EQUAL_INT(8, f.sats);
+  TEST_ASSERT_DOUBLE_WITHIN(1e-6, 545.4, f.altM);
+  // corrupted checksum, void RMC, no-fix GGA, other sentences
+  TEST_ASSERT_FALSE(nmea::parse("$GPRMC,123519,A,4807.038,N,01131.000,E,022.4,084.4,230394,003.1,W*6B", f));
+  nmea::Fix g;
+  // build a void RMC with a correct checksum
+  char v[96] = "$GNRMC,001122.00,V,,,,,,,260926,,,N";
+  uint8_t sum = 0;
+  for (char *p = v + 1; *p; p++) sum ^= (uint8_t)*p;
+  snprintf(v + strlen(v), 8, "*%02X", sum);
+  TEST_ASSERT_TRUE(nmea::parse(v, g));
+  TEST_ASSERT_FALSE(g.timeValid);
+  TEST_ASSERT_FALSE(nmea::parse("$GPGSV,2,1,08,01,40,083,46,02,17,308,41,12,07,344,39,14,22,228,45*75", g));
+}
+
+void test_pec() {
+  const double sid = 12492146 / 360.0 * 360.9856 / 86400;  // counts per sidereal-rate second
+  pec::Worm w = pec::worm(12492146, 144, sid);
+  TEST_ASSERT_EQUAL_INT(86751, w.counts);
+  TEST_ASSERT_EQUAL_INT(598, w.segments);
+  TEST_ASSERT_EQUAL_INT(0, pec::segment(w, 1000, 1000));
+  TEST_ASSERT_EQUAL_INT(597, pec::segment(w, 999, 1000));   // just before the origin
+  TEST_ASSERT_EQUAL_INT(0, pec::segment(w, 1000 + 86751, 1000));
+  // record a sine (+ a drift that must be removed), smoothing keeps its shape
+  static pec::Recorder r;
+  r.reset(w.segments);
+  const double amp = 30.0 / 0.1037;  // +-30" in counts, as a PE curve
+  for (int i = 0; i < w.segments; i++) {
+    // correction per segment = derivative of -PE: what the guider sends
+    double c = amp * 2 * M_PI / w.segments * cos(2 * M_PI * i / w.segments) + 0.7;
+    r.add(i, (float)c);
+  }
+  static float table[pec::MAX_SEGMENTS];
+  pec::finish(r, table, w.segments, 5, false);
+  double sum = 0, peak = 0;
+  for (int i = 0; i < w.segments; i++) {
+    sum += table[i];
+    if (fabs(table[i]) > peak) peak = fabs(table[i]);
+  }
+  TEST_ASSERT_DOUBLE_WITHIN(1e-3, 0, sum);                            // drift removed
+  TEST_ASSERT_DOUBLE_WITHIN(0.01, amp * 2 * M_PI / w.segments, peak);  // shape kept
+  // playback delivers the table exactly over a turn despite coarse T1
+  pec::Player pl;
+  double delivered = 0, wanted = 0;
+  const long timerHz = 62338;
+  for (int i = 0; i < w.segments; i++) {
+    uint32_t t1 = pl.t1(sid, table[i], w.segCounts / sid, timerHz);
+    delivered += (double)timerHz / t1 * (w.segCounts / sid);
+    wanted += sid * (w.segCounts / sid) + table[i];
+  }
+  TEST_ASSERT_DOUBLE_WITHIN(1.0, wanted, delivered);  // within one count over ~10 minutes
+}
+
+void test_refraction() {
+  TEST_ASSERT_DOUBLE_WITHIN(0.1, 0.0, refractionArcmin(90));
+  TEST_ASSERT_DOUBLE_WITHIN(0.1, 1.0, refractionArcmin(45));     // ~1' at 45 deg
+  TEST_ASSERT_DOUBLE_WITHIN(0.3, 5.3, refractionArcmin(10));     // ~5.3' at 10 deg
+  TEST_ASSERT_DOUBLE_WITHIN(3, 29, refractionArcmin(0));         // ~29' at the horizon
+  // refraction lifts: apparent altitude higher; on the meridian HA is unchanged
+  double h, d;
+  apparentHaDec(0, 0, 40.87, h, d);
+  TEST_ASSERT_DOUBLE_WITHIN(1e-6, 0, h);
+  TEST_ASSERT_TRUE(d > 0 && d < 0.05);  // pushed north (up) by ~1'
+  // rate factor: slightly < 1 even on the meridian (lifted toward the pole: smaller
+  // apparent circle, more so near the pole), < 1 low in the west
+  TEST_ASSERT_DOUBLE_WITHIN(1e-5, 0.99975, refractionRateFactor(0, 20, 40.87));
+  TEST_ASSERT_TRUE(refractionRateFactor(0, 80, 40.87) < refractionRateFactor(0, 20, 40.87));
+  double f = refractionRateFactor(75, 5, 40.87);
+  TEST_ASSERT_TRUE(f < 0.9995 && f > 0.995);
+  // symmetric in the east
+  TEST_ASSERT_DOUBLE_WITHIN(1e-6, f, refractionRateFactor(-75, 5, 40.87));
+  // below 5 deg: no compensation
+  TEST_ASSERT_EQUAL_DOUBLE(1.0, refractionRateFactor(100, 0, 40.87));
+}
+
 void test_hms_matches_lx200() {
   for (size_t i = 0; i < N(HMS_CASES); i++) {
     int h, m, s;
@@ -246,6 +337,9 @@ int main() {
   RUN_TEST(test_sync_keeps_branch);
   RUN_TEST(test_onstep_parsing);
   RUN_TEST(test_onstep_formatting);
+  RUN_TEST(test_nmea);
+  RUN_TEST(test_pec);
+  RUN_TEST(test_refraction);
   RUN_TEST(test_hms_matches_lx200);
   RUN_TEST(test_dec_steps_match_lx200);
   RUN_TEST(test_parse_and_format);

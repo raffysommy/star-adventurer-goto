@@ -1,6 +1,7 @@
 #include "clock.h"
 
 #include <astro.h>
+#include <math.h>
 #include <esp_sntp.h>
 #include <sys/time.h>
 
@@ -30,12 +31,16 @@ double clockNow() {
 
 const char *clockSource() { return source; }
 
+// Trust order: NTP (ms, needs internet) > GPS (NMEA, ~0.1 s) > client / browser
+static int rank(const char *src) { return !strcmp(src, "ntp") ? 3 : !strcmp(src, "gps") ? 2 : 1; }
+
 bool clockSet(double unixUtc, const char *src) {
   double diff = unixUtc - clockNow();
-  if (!strcmp(source, "ntp")) {
-    logf("clock: ignoring %s time (NTP in charge, diff %.1f s)", src, diff);
+  if (rank(src) < rank(source)) {
+    logf("clock: ignoring %s time (%s in charge, diff %.1f s)", src, source, diff);
     return false;
   }
+  if (!strcmp(src, "gps") && !strcmp(source, "gps") && fabs(diff) < 0.5) return true;  // already right
   struct timeval tv = {(time_t)unixUtc, (suseconds_t)((unixUtc - (time_t)unixUtc) * 1e6)};
   settimeofday(&tv, nullptr);
   source = src;

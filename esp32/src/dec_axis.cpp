@@ -28,6 +28,8 @@ static volatile bool pulseActive = false;
 // within [motor - backlash, motor]; motor - backlash while pushing forward, motor
 // while pushing backward.
 static volatile long backlash = 250;
+static volatile float guideSpeed = SIDEREAL_STEPS * 0.5f;
+static volatile long limMin = 0, limMax = astro::DEC_STEPS_PER_REV;
 static long gear = HOME_STEPS;
 static portMUX_TYPE gearMux = portMUX_INITIALIZER_UNLOCKED;
 
@@ -58,6 +60,16 @@ bool moving() { return slewActive || guideActive; }
 
 void setTarget(long steps) { targetPos = steps; }
 
+void setGuideRate(float x) { guideSpeed = SIDEREAL_STEPS * x; }
+
+void setLimits(long minSteps, long maxSteps) {
+  limMin = minSteps;
+  limMax = maxSteps;
+  logf("dec: axis limits %ld .. %ld steps", minSteps, maxSteps);
+}
+
+bool withinLimits(long steps) { return steps >= limMin && steps <= limMax; }
+
 void setBacklash(long steps) {
   backlash = max(0L, steps);
   logf("dec: backlash %ld steps", (long)backlash);
@@ -74,6 +86,10 @@ static long playBefore(int dir) {
 
 void slew() {
   if (!stepper) return;
+  if (!withinLimits(targetPos)) {
+    logf("dec: slew to %ld REFUSED, outside the axis limits %ld .. %ld", (long)targetPos, (long)limMin, (long)limMax);
+    return;
+  }
   long g = position();
   guideActive = pulseActive = false;
   pendingRun = 0;
@@ -104,6 +120,10 @@ void stop() {
 
 void guide(int dir) {
   if (!stepper) return;
+  if ((dir > 0 && position() >= limMax) || (dir < 0 && position() <= limMin)) {
+    logf("dec: move REFUSED, at the axis limit");
+    return;
+  }
   slewActive = false;
   slewPhase2 = false;
   pulseActive = false;
@@ -116,7 +136,7 @@ void guide(int dir) {
     return;
   }
   pendingRun = 0;
-  stepper->setSpeedInMilliHz(milliHz(GUIDE_SPEED));
+  stepper->setSpeedInMilliHz(milliHz(guideSpeed));
   if (stepper->isRunning()) stepper->applySpeedAcceleration();
   dir > 0 ? stepper->runForward() : stepper->runBackward();
 }
@@ -126,7 +146,7 @@ void guidePulse(int dir, int ms) {
   slewActive = false;
   slewPhase2 = false;
   pendingRun = 0;
-  pulseRemainder += dir * GUIDE_SPEED * ms / 1000.0;
+  pulseRemainder += dir * guideSpeed * ms / 1000.0;
   long steps = lround(pulseRemainder);
   pulseRemainder -= steps;
   if (!steps) return;
@@ -134,12 +154,14 @@ void guidePulse(int dir, int ms) {
   if (!pulseActive) guideTarget = position();
   pulseActive = true;
   guideTarget += steps;
+  if (guideTarget > limMax) guideTarget = limMax;
+  if (guideTarget < limMin) guideTarget = limMin;
   long mt = motorFor(guideTarget, d);
   // after a reversal the play is run out at slew speed, together with the (few) pulse
   // steps: the sky then moves by the pulse, not by nothing
   bool takeUp = labs(mt - motorPosition()) > labs(guideTarget - position()) + 1;
   guideActive = true;
-  stepper->setSpeedInMilliHz(milliHz(takeUp ? SLEW_SPEED : GUIDE_SPEED));
+  stepper->setSpeedInMilliHz(milliHz(takeUp ? SLEW_SPEED : guideSpeed));
   stepper->moveTo(mt);
   if (takeUp) logf("dec: pulse %+ld steps, backlash take-up %ld", steps, labs(mt - motorPosition()) - labs(steps));
 }
@@ -179,7 +201,12 @@ void setInverted(bool inv, bool atBoot) {
 
 static void task(void *) {
   while (true) {
-    position();  // keep the backlash model current
+    long pos = position();  // keeps the backlash model current
+    // continuous moves (:Mn/:Ms) stop at the axis limits
+    if (guideActive && !pulseActive && stepper->isRunning() && (pos > limMax || pos < limMin)) {
+      stop();
+      logf("dec: move STOPPED at the axis limit (%ld)", pos);
+    }
     if (slewActive && !stepper->isRunning()) {
       if (slewPhase2) {
         slewPhase2 = false;
@@ -192,7 +219,7 @@ static void task(void *) {
     if (guideActive && pendingRun && !stepper->isRunning()) {
       int dir = pendingRun;
       pendingRun = 0;
-      stepper->setSpeedInMilliHz(milliHz(GUIDE_SPEED));
+      stepper->setSpeedInMilliHz(milliHz(guideSpeed));
       dir > 0 ? stepper->runForward() : stepper->runBackward();
     } else if (guideActive && !stepper->isRunning()) {
       guideActive = pulseActive = false;  // pulse done

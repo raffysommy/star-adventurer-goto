@@ -17,6 +17,16 @@ void settingsLoad() {
   settings.lx200Port = p.getUShort("lx_port", d.lx200Port);
   settings.decBacklash = p.getInt("dec_bl", d.decBacklash);
   settings.raEastLimit = p.getDouble("ra_east", d.raEastLimit);
+  settings.raWestMinutes = p.getInt("ra_west_min", d.raWestMinutes);
+  settings.horizonLimit = p.getInt("hor_lim", d.horizonLimit);
+  settings.overheadLimit = p.getInt("ovh_lim", d.overheadLimit);
+  settings.gpsEnabled = p.getBool("gps_en", d.gpsEnabled);
+  settings.refraction = p.getBool("refr", d.refraction);
+  settings.pecStrict = p.getBool("pec_strict", d.pecStrict);
+  settings.guideRate = p.getDouble("guide_rate", d.guideRate);
+  settings.decAxisMin = p.getDouble("dec_min", d.decAxisMin);
+  settings.decAxisMax = p.getDouble("dec_max", d.decAxisMax);
+  settings.gpsSetsSite = p.getBool("gps_site", d.gpsSetsSite);
   p.end();
 }
 
@@ -32,5 +42,15 @@ void settingsSave() {
   p.putUShort("lx_port", settings.lx200Port);
   p.putInt("dec_bl", settings.decBacklash);
   p.putDouble("ra_east", settings.raEastLimit);
+  p.putInt("ra_west_min", settings.raWestMinutes);
+  p.putInt("hor_lim", settings.horizonLimit);
+  p.putInt("ovh_lim", settings.overheadLimit);
+  p.putBool("gps_en", settings.gpsEnabled);
+  p.putBool("refr", settings.refraction);
+  p.putBool("pec_strict", settings.pecStrict);
+  p.putDouble("guide_rate", settings.guideRate);
+  p.putDouble("dec_min", settings.decAxisMin);
+  p.putDouble("dec_max", settings.decAxisMax);
+  p.putBool("gps_site", settings.gpsSetsSite);
   p.end();
 }

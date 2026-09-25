@@ -61,6 +61,8 @@ Wi-Fi interface (`curl --interface wlo1`, `STARMOUNT_IFACE=wlo1` for the tests).
 | `/api/settings`, `/api/time`, `/api/home`, `/api/stop` | Settings, set clock from the browser, set RA home, stop |
 | `/api/lx200?c=:GR` | Run one OnStep/LX200 command over HTTP |
 | `/api/register`, `/api/goto_ha`, `/api/dec` | Debug: redefine the RA register, slew to a register angle, DEC test moves |
+| TCP 10110 | NMEA over TCP: the GPS sentences, for INDI's "GPS NMEA" driver (KStars/Ekos time and location) |
+| `/api/tasks`, `/api/gps_nmea` | Per-task CPU/stack/heap; inject NMEA sentences (debug, no GPS needed) |
 | `/log`, telnet 23 | Log (kept across resets: after a crash `/log` still shows the previous boot) |
 | `/sys`, `/cmd?c=:e1`, `/update`, `/wifi` | System status, raw mount command, firmware upload, Wi-Fi setup |
 | UDP 11880 | SynScan Wi-Fi-dongle compatible bridge to the mount (debugging only: it bypasses the RA controller) |
@@ -180,6 +182,56 @@ targeted is the gear position. On a reversal the play is run out at slew speed (
 included, so PHD2 sees no dead zone). `backlash` is a setting (dashboard, NVS key `dec_bl`,
 default 250 steps); lowering it softens the one-pulse overshoot after a reversal.
 
+## PEC, limits and GPS (2026-09-26)
+
+- **PEC**, OnStep-style (`:$QZ+ - / Z ! ?`, `:VR`/`:WR`, `:GXE6/7/8`; the INDI OnStep PEC tab):
+  - The table has one correction per worm segment (~1 sidereal s; 599 segments of 86,751 counts
+    per 144-tooth worm turn), in register counts.
+  - **Record** takes RA guide pulses for one worm turn (turn PHD2's Predictive PEC off). It is
+    smoothed, its mean removed, and averaged with the previous table.
+  - **Play** changes the RA step period each segment and carries the rounding into the next
+    segment, so a whole turn is exact despite the coarse T1.
+  - **Worm phase** follows every register rewrite (sync, home, east limit) and is saved to NVS
+    every 10 s. After a power-on it is restored, on the assumption that the worm didn't turn
+    while unpowered.
+  - **Playback only starts after 60 s without guide pulses**, so PHD2 never sees PEC switch on mid-guiding.
+- **Limits**:
+  - GoTo is refused below the horizon limit (`:Sh`, code `1`) and above the overhead limit (`:So`, `2`).
+  - Tracking stops `raWestMinutes` past the meridian on the flipped branch (`:SXEA`, default
+    120, capped by the overflow). `:SXE9` sets the east limit.
+- **GPS** (boilerplate until the module is wired: UART1 RX 17 / TX 18, 9600, any NMEA RMC+GGA):
+  - Time is trusted below NTP and above clients.
+  - A fix with ≥4 satellites and HDOP < 5 sets the site.
+  - `:GU#` reports `S` while the GPS keeps the clock.
+  - The sentences are relayed on TCP 10110.
+  - Tested by injection.
+- **Resources** (measured, guiding plus a client polling 10× faster than INDI):
+  - core 0 6% busy, core 1 18% busy
+  - 157 KB internal heap free, PSRAM unused
+
+## Rates, refraction, limits (2026-09-26)
+
+- **Tracking rates:**
+  - sidereal, lunar, solar, King and custom (`:TQ :TL :TS :TK :ST`); not saved, sidereal at boot
+  - The base is now true sidereal (`lx200.py`'s 0.004176 was a fixed "refracted" slow-down).
+  - Measured: the SA's count rate isn't exactly 1/T1. T1 447 (lunar) runs 0.36% slower than
+    predicted, which probably also explains PEC's 1.04 playback gain. To do: calibrate rate(T1) once.
+- **Refraction** (`:Tr`/`:Tn`, default on, RA only; `:T2` dual axis is not supported):
+  - Every 10 s the rate is scaled by d(apparent HA)/d(true HA) at the current pointing
+    (Saemundsson's formula).
+  - Examples: 0.99975 on the meridian at Dec +20, about 0.9985 at 20° altitude in the west.
+- **Guide rate** is one setting for both axes (`:SX90,n#`, dashboard, 0.1–0.9×, default 0.5).
+  - DEC backlash can be set from the client (`:$BD[arcsec]#`). RA backlash only accepts 0.
+- **Axis limits** (`:GXEe/w` RA window in axis hour angle, `:GXEC/D` DEC mechanical, set with `:SXEx,n#`):
+  - A GoTo past a DEC limit is refused with code `6`.
+  - Manual moves stop at the limit, and guide pulses are clamped.
+  - This is the counts-based layer of the collision limits.
+- **PEC start rule** (default *strict*): playback starts only before guiding begins for the
+  target (no pulse since boot or the last GoTo); otherwise it waits for the next GoTo.
+  - Option: after 60 s without pulses.
+  - A table recorded with a different segment count (it changed from 599 to 598 with true
+    sidereal) is not loaded: record again.
+
 ## Tests
 
 - `pio test -e native`: astro math, DEC steps, parsing. Regenerate golden values with
@@ -188,6 +240,11 @@ default 250 steps); lowering it softens the one-pulse overshoot after a reversal
   - `guide_soak.py [N]`: random N/S/E/W pulse guiding; checks both axes moved exactly as
     commanded and that the RA motor was never restarted
   - `goto_test.py`: sync, then two combined RA+DEC GoTos and back. **Moves the mount.**
+  - `pec_test.py`: records a synthetic periodic error from simulated guide pulses (one worm
+    turn), checks the table, plays it back and checks that the register follows it (~17 min, RA tracking only).
+    2026-09-26: table correlation 0.978, playback correlation 0.999, gain 1.04, 5.4 counts rms residual.
+  - `features_test.py`: tracking rates, refraction, guide rate, backlash, DEC axis limits and
+    the strict PEC rule (~3 min, small moves)
 
   ```sh
   cd test/hil && STARMOUNT_HOST=starmount.local STARMOUNT_IFACE=wlo1 python3 guide_soak.py

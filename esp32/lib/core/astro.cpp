@@ -234,6 +234,43 @@ bool parseSC(const char *cmd, int &mo, int &d, int &yy) {
          expect(p, '#') && mo >= 1 && mo <= 12 && d >= 1 && d <= 31;
 }
 
+// ---------------------------------------------------------------- refraction
+
+static const double D2R = M_PI / 180.0;
+
+double refractionArcmin(double h) {
+  if (h < -1) return 0;
+  return 1.02 / tan((h + 10.3 / (h + 5.11)) * D2R);
+}
+
+void apparentHaDec(double ha, double dec, double lat, double &haApp, double &decApp) {
+  double H = ha * D2R, d = dec * D2R, p = lat * D2R;
+  // to horizontal (az from north, east positive)
+  double sinAlt = sin(d) * sin(p) + cos(d) * cos(p) * cos(H);
+  double alt = asin(sinAlt);
+  double az = atan2(-cos(d) * sin(H), sin(d) * cos(p) - cos(d) * sin(p) * cos(H));
+  alt += refractionArcmin(alt / D2R) / 60.0 * D2R;
+  // back to equatorial
+  double sd = sin(alt) * sin(p) + cos(alt) * cos(p) * cos(az);
+  decApp = asin(sd) / D2R;
+  haApp = atan2(-cos(alt) * sin(az), sin(alt) * cos(p) - cos(alt) * sin(p) * cos(az)) / D2R;
+}
+
+double refractionRateFactor(double ha, double dec, double lat) {
+  double H = ha * D2R, d = dec * D2R, p = lat * D2R;
+  double alt = asin(sin(d) * sin(p) + cos(d) * cos(p) * cos(H)) / D2R;
+  if (alt < 5) return 1;
+  const double step = 0.25;  // deg of HA (1 min of time)
+  double h1, d1, h2, d2;
+  apparentHaDec(ha - step, dec, lat, h1, d1);
+  apparentHaDec(ha + step, dec, lat, h2, d2);
+  double dh = h2 - h1;
+  if (dh > 180) dh -= 360;
+  if (dh < -180) dh += 360;
+  double f = dh / (2 * step);
+  return f < 0.99 ? 0.99 : f > 1.01 ? 1.01 : f;
+}
+
 // ---------------------------------------------------------------- OnStep formats
 
 static bool sexSep(const char *&p) {

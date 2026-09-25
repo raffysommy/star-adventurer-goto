@@ -12,6 +12,7 @@
 #include "clock.h"
 #include "dashboard.h"
 #include "dec_axis.h"
+#include "gps.h"
 #include "mount.h"
 #include "onstep_server.h"
 #include "mount_usb.h"
@@ -77,6 +78,28 @@ static const char PAGE_HEAD[] PROGMEM =
     "input,button{padding:6px;margin:4px 0}td{padding:2px 12px 2px 0}</style></head><body><h1>StarMount</h1>"
     "<p><a href=/>mount</a> | <a href=/sys>system</a> | <a href=/log>log</a> | <a href=/cmd>command</a> | <a href=/wifi>wifi</a> | "
     "<a href=/update>firmware</a></p>";
+
+// Per-task stack headroom and CPU time (FreeRTOS run-time stats, microsecond counter).
+// CPU load = delta of runtime between two calls; idle tasks give the free share per core.
+static String jsonTasks() {
+  UBaseType_t n = uxTaskGetNumberOfTasks();
+  TaskStatus_t *t = (TaskStatus_t *)malloc(n * sizeof(TaskStatus_t));
+  if (!t) return "{}";
+  uint32_t total;
+  n = uxTaskGetSystemState(t, n, &total);
+  String s = "{\"total_us\":" + String(total) + ",\"min_free_heap\":" + String(ESP.getMinFreeHeap()) +
+             ",\"heap\":" + String(ESP.getFreeHeap()) + ",\"tasks\":[";
+  for (UBaseType_t i = 0; i < n; i++) {
+    int core = t[i].xCoreID == tskNO_AFFINITY ? -1 : (int)t[i].xCoreID;
+    char b[160];
+    snprintf(b, sizeof(b), "%s{\"name\":\"%s\",\"core\":%d,\"prio\":%u,\"stack_free\":%lu,\"run_us\":%lu}",
+             i ? "," : "", t[i].pcTaskName, core, (unsigned)t[i].uxCurrentPriority,
+             (unsigned long)t[i].usStackHighWaterMark, (unsigned long)t[i].ulRunTimeCounter);
+    s += b;
+  }
+  free(t);
+  return s + "]}";
+}
 
 static String jsonStatus() {
   MountStats s = mountStats();
@@ -177,6 +200,24 @@ static void webBegin() {
   web.on("/sys", handleRoot);
   dashboardBegin(web);
   web.on("/api/status", [] { web.send(200, "application/json", jsonStatus()); });
+  web.on("/api/tasks", [] { web.send(200, "application/json", jsonTasks()); });
+  // Debug: feed NMEA sentences as if the GPS sent them (one per line, POST body "nmea")
+  web.on("/api/gps_nmea", HTTP_POST, [] {
+    String body = web.arg("nmea");
+    int n = 0, start = 0;
+    while (start < (int)body.length()) {
+      int end = body.indexOf('\n', start);
+      if (end < 0) end = body.length();
+      String line = body.substring(start, end);
+      line.trim();
+      if (line.length()) {
+        gps::inject(line.c_str());
+        n++;
+      }
+      start = end + 1;
+    }
+    web.send(200, "application/json", "{\"lines\":" + String(n) + "}");
+  });
   web.on("/log", [] { web.send(200, "text/plain; charset=utf-8", netlogHistory()); });
   web.on("/cmd", handleCmd);
   web.on("/wifi", handleWifi);
@@ -231,7 +272,9 @@ void setup() {
   dec::begin();
   dec::setInverted(settings.pierEast, true);
   mount::begin();
+  mount::applyDecSettings();
   onstep::begin();
+  gps::begin();
 
   // A hang (e.g. starved idle tasks) reboots instead of silently killing Wi-Fi
   esp_task_wdt_config_t wdt = {.timeout_ms = 15000, .idle_core_mask = 0b11, .trigger_panic = true};

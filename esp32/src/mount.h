@@ -21,8 +21,11 @@ void setTargetDec(double decDeg); // :Sd
 bool hasTarget();
 double targetRaDeg();              // as requested (:Gr#)
 double targetDecDeg();             // (:Gd#)
-// :MS  GoTo the target, branch from the GoTo window. false: no RA target.
-bool gotoTarget();
+// :MS  GoTo the target, branch from the GoTo window. Returns OnStep's code: 0 started,
+// 1 below the horizon limit, 2 above the overhead limit, 6 outside the DEC axis limits,
+// 9 no RA target.
+int gotoTarget();
+double altitudeOf(double raDeg, double decDeg);  // now, at the site
 // :CM  Sync to the target, keeping the branch the mount is physically on. false: refused.
 bool syncTarget();
 
@@ -31,6 +34,7 @@ void pulse(char dir, int ms);     // :Mg[nsew]ms
 void stop();                      // :Q   all axes
 void stopAxis(char dir);          // :Qn :Qs (DEC)  :Qe :Qw (RA)
 void setTracking(bool on);        // OnStep :Te / :Td
+void applyDecSettings();          // guide rate and axis limits from settings
 
 double reportedRaDeg();
 double reportedDecDeg();

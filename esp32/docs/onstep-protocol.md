@@ -110,9 +110,33 @@ Probed once and answered "none", which is fine:
 - `:MS#` answers `9` (unspecified) without a target, and `:CM#` answers `E6#` if the sync is refused.
 - `:GU#` error digit: `7` (hardware fault) while the RA mount isn't connected.
 
+### Added 2026-09-26
+
+| Commands | Reply | Notes |
+|---|---|---|
+| `:$QZ+#` `:$QZ-#` `:$QZ/#` `:$QZZ#` `:$QZ!#` | nothing | PEC play / stop / record / clear / save (INDI's PEC tab) |
+| `:$QZ?#` | `I` `p` `P` `r` `R`, plus `.` when the worm phase is known | Status: ignore, ready to play, playing, ready to record, recording |
+| `:VR[n]#` / `:VR#` / `:WR[n,sn]#` | `sn#` / `sn,n#` / nothing | Table entry (register counts), current segment, write an entry |
+| `:GXE6#` `:GXE7#` `:GXE8#` `:VW#` `:VS#` | numbers | Counts per sidereal second, per worm turn, segments |
+| `:Sh[sDD]#` `:So[DD]#` | `1`/`0` | Horizon (−30..30) and overhead (60..90) limits, enforced on GoTo (`:MS#` → `1`/`2`) |
+| `:SXE9,[n]#` `:SXEA,[n]#` | `1`/`0` | Minutes past the meridian: east limit (shifts the register window) and west tracking stop |
+| `:GU#` | adds `S`, `R` and the PEC state character | GPS time sync, PEC recorded, `/,~;^` |
+
+### Added 2026-09-26 (2)
+
+| Commands | Reply | Notes |
+|---|---|---|
+| `:TQ#` `:TL#` `:TS#` `:TK#` `:ST[H.H]#` | `1` | Sidereal / lunar / solar / King / custom rate (Hz). `:GT#` reports it |
+| `:Tr#` `:Tn#` `:T1#` | `1` | Refraction on / off, single axis. `:T2#` (dual axis) and `:To#` answer `0` |
+| `:SX90,[n.n]#` | `1`/`0` | Guide rate for both axes, 0.1–0.9× (non-standard set; `:GX90#` reports it) |
+| `:$BD[n]#` `:$BR[n]#` | `1`/`0` | DEC backlash in arcsec. RA accepts only 0 |
+| `:GXEe#` `:GXEw#` `:GXEB#` `:GXEC#` `:GXED#` | `n#` | RA axis limits (axis hour angle, deg; `B` in hours), DEC mechanical limits |
+| `:SXEe,n#` `:SXEw,n#` `:SXEC,n#` `:SXED,n#` | `1`/`0` | Set them (non-standard in OnStepX, where they are compile-time) |
+| `:MS#` | adds `6` | Target outside the DEC axis limits |
+| `:GU#` | `rs` with refraction on, else `(` `O` `k` for lunar / solar / King | |
+
 ## Next
 
 1. Ekos + PHD2 across a real flip, to check that PHD2 flips its calibration from the pier side.
 2. NINA through the ASCOM OnStep driver.
-3. `:SXE9`/`:SXEA` to set the window from the client.
-4. PEC commands (record/play/status, see the PEC design), GPS (`S` flag, site and time), and horizon/overhead limits.
+3. When the GPS is wired: check INDI's GPS NMEA driver on `starmount.local:10110`, and GPS time in the field (no NTP).

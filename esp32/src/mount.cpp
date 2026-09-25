@@ -94,14 +94,36 @@ double targetDecDeg() {
   return reqDec;
 }
 
-bool gotoTarget() {
+double altitudeOf(double raDeg, double decDeg) {
+  double ha = (ra::lst() - raDeg) * DEG_TO_RAD, dec = decDeg * DEG_TO_RAD, lat = settings.lat * DEG_TO_RAD;
+  return asin(sin(dec) * sin(lat) + cos(dec) * cos(lat) * cos(ha)) * RAD_TO_DEG;
+}
+
+int gotoTarget() {
   Guard g;
-  bool ok = raValid;
-  if (!ok) {
+  int code = raValid ? 0 : 9;
+  if (raValid && decValid) {
+    double alt = altitudeOf(reqRa, reqDec);
+    if (alt < settings.horizonLimit) code = 1;
+    if (alt > settings.overheadLimit) code = 2;
+    if (code) {
+      logf("mount: goto REFUSED, target altitude %.1f outside [%d, %d]", alt, (int)settings.horizonLimit,
+           (int)settings.overheadLimit);
+      return code;
+    }
+  }
+  if (code) {
     logf("mount: goto without a target, ignored");
   } else {
     // set_ra(): targets past the window are reached through the pole
     astro::RaTarget t = astro::selectTarget(reqRa, ra::lst(), ra::offset());
+    if (decValid) {
+      long steps = astro::decToSteps(astro::decForSteps(reqDec, t.flipped ^ settings.decAxisReversed));
+      if (!dec::withinLimits(steps)) {
+        logf("mount: goto REFUSED, DEC axis target %ld steps outside the axis limits", steps);
+        return 6;
+      }
+    }
     setFlipped(t.flipped);
     st.raTarget = t.ra;
     logf("mount: goto RA %.4f -> axis RA %.4f%s", reqRa, t.ra, t.flipped ? " (meridian flipped)" : "");
@@ -109,7 +131,7 @@ bool gotoTarget() {
   }
   setDecTarget();
   dec::slew();
-  return ok;
+  return code;
 }
 
 bool syncTarget() {
@@ -185,6 +207,11 @@ void stopAxis(char dir) {
 }
 
 void setTracking(bool on) { ra::setTracking(on); }
+
+void applyDecSettings() {
+  dec::setGuideRate(settings.guideRate);
+  dec::setLimits(astro::decToSteps(settings.decAxisMin), astro::decToSteps(settings.decAxisMax));
+}
 
 double reportedRaDeg() {
   ra::State r = ra::state();

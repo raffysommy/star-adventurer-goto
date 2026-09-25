@@ -81,6 +81,19 @@ bool parseSG(const char *cmd, double &hoursToUtc);  // :SGsHH.H#  (local + value
 bool parseSL(const char *cmd, int &h, int &m, int &s);        // :SLHH:MM:SS#
 bool parseSC(const char *cmd, int &mo, int &d, int &yy);      // :SCMM/DD/YY#
 
+// ---------------------------------------------------------------- refraction
+// Saemundsson's formula: refraction (arcmin) for a true altitude (deg), standard
+// atmosphere (10 C, 1010 mb); 0 below -1 deg.
+double refractionArcmin(double trueAltDeg);
+// Apparent (refracted) hour angle and declination of a true position.
+void apparentHaDec(double haDeg, double decDeg, double latDeg, double &haApp, double &decApp);
+// Refraction-compensated RA tracking: d(apparent HA)/d(true HA), i.e. the factor to
+// apply to the sidereal rate to follow the object as seen. Slightly below 1 everywhere
+// (0.99975 on the meridian at Dec +20, lat 41), lower low in the west and east and
+// near the pole. Clamped to [0.99, 1.01] (1 below 5 deg,
+// where the formula and the air are unreliable).
+double refractionRateFactor(double haDeg, double decDeg, double latDeg);
+
 // ---------------------------------------------------------------- OnStep formats
 // OnStep clients send high-precision values ("17:30:00.00", "+40:52:22.08",
 // "345:33:44.28") and even "17:23:60.00" (the INDI driver rounds up to 60 s).
