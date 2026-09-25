@@ -4,7 +4,8 @@
 
 #include "clock.h"
 #include "dec_axis.h"
-#include "lx200_server.h"
+#include "mount.h"
+#include "onstep_server.h"
 #include "ra_axis.h"
 #include "settings.h"
 
@@ -92,7 +93,7 @@ refresh();setInterval(refresh,1000);
 </script></body></html>)HTML";
 
 // dashboard_mount_state()
-static String mountState(const ra::State &r, const lx200::State &l) {
+static String mountState(const ra::State &r, const mount::State &l) {
   if (!r.connected && !dec::moving()) return "RA MOUNT NOT CONNECTED";
   if (!strcmp(r.phase, "limit")) return "STOPPED AT RA LIMIT";
   if (r.slewing) return strcmp(r.phase, "approach") ? "SLEWING" : "SLEWING (approach)";
@@ -108,7 +109,7 @@ static String mountState(const ra::State &r, const lx200::State &l) {
 
 static void sendStatus() {
   ra::State r = ra::state();
-  lx200::State l = lx200::state();
+  mount::State l = mount::state();
   double lst = ra::lst();
   char lstHms[16];
   astro::formatRa(lst, lstHms, sizeof(lstHms));
@@ -120,12 +121,12 @@ static void sendStatus() {
            "\"clock\":%.3f,\"clock_valid\":%s,\"clock_source\":\"%s\",\"utc_offset\":%.2f,\"lat\":%.4f,\"lon\":%.4f,"
            "\"stalls\":%lu,\"kicks\":%lu,\"keep_alives\":%lu,\"lx200_clients\":%d,"
            "\"dec_steps\":%ld,\"dec_target\":%ld,\"dec_motor\":%ld,\"dec_backlash\":%ld,\"ra_east_limit\":%.1f,\"dec_moving\":%s,\"pier_east\":%s}",
-           lx200::reportedRa().c_str(), lx200::reportedDec().c_str(), mountState(r, l).c_str(), r.phase,
+           mount::reportedRa().c_str(), mount::reportedDec().c_str(), mountState(r, l).c_str(), r.phase,
            l.meridianFlipped ? "true" : "false", settings.decAxisReversed ? "true" : "false",
            settings.flipRaGuiding ? "true" : "false", (l.meridianFlipped ^ settings.decAxisReversed) ? "true" : "false",
            r.axisRa, r.axisHa, r.counts, l.raTarget, lst, lstHms, clockNow(), clockValid() ? "true" : "false",
            clockSource(), settings.utcOffset, settings.lat, settings.lonEast, (unsigned long)r.stalls,
-           (unsigned long)r.kicks, (unsigned long)r.keepAlives, l.clients, dec::position(), dec::target(),
+           (unsigned long)r.kicks, (unsigned long)r.keepAlives, onstep::clients(), dec::position(), dec::target(),
            dec::motorPosition(), (long)settings.decBacklash, settings.raEastLimit, dec::moving() ? "true" : "false", settings.pierEast ? "true" : "false");
   srv->send(200, "application/json", buf);
 }
@@ -175,7 +176,7 @@ void dashboardBegin(WebServer &web) {
     srv->send(200, "application/json", "{\"ok\":true}");
   });
   web.on("/api/stop", HTTP_POST, [] {
-    lx200::process(":Q#");
+    onstep::process(":Q#");
     srv->send(200, "application/json", "{\"ok\":true}");
   });
   web.on("/api/register", HTTP_POST, [] {
@@ -196,7 +197,7 @@ void dashboardBegin(WebServer &web) {
       dec::slew();
     } else if (a == "guide") {
       String c = ":Mg" + srv->arg("dir") + srv->arg("ms") + "#";
-      lx200::process(c);
+      onstep::process(c);
     } else if (a == "stop") {
       dec::stop();
     } else {
@@ -208,6 +209,6 @@ void dashboardBegin(WebServer &web) {
   web.on("/api/lx200", [] {
     String c = srv->arg("c");
     if (!c.endsWith("#")) c += "#";
-    srv->send(200, "text/plain", lx200::process(c));
+    srv->send(200, "text/plain", onstep::process(c));
   });
 }

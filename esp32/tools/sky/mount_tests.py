@@ -30,8 +30,9 @@ class LX:
         if not reply:
             return ''
         d = b''
+        single = (':Sr', ':Sd', ':MS', ':Sg', ':St', ':SG', ':SL', ':SC')  # OnStep: '1'/'0'
         try:
-            while not d.endswith(b'#') and not (c.startswith(':MS') and d):
+            while not d.endswith(b'#') and not (c.startswith(single) and d):
                 d += self.s.recv(256)
         except socket.timeout:
             pass

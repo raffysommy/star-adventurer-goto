@@ -27,6 +27,8 @@ void setHome();              // register := offset() (mount at its home position
 // Move the register window (settings.raEastLimit). The register is shifted by the same
 // amount so the mount's physical position keeps its meaning.
 void setEastLimit(double deg);
+// Tracking off: motor stopped until tracking on, a GoTo or a sync (OnStep :Td / :Te)
+void setTracking(bool on);
 void setRegister(double ha); // debug: redefine the current position (no motion)
 void gotoHa(double ha);      // debug: slew to a fixed register angle
 
@@ -40,8 +42,9 @@ double lst();                // local sidereal time now, degrees
 struct State {
   bool connected;
   bool slewing;
+  bool tracking;      // sidereal tracking or guiding (not slewing, not stopped)
   bool guideEast, guideWest;
-  const char *phase;  // disconnected / tracking / guiding / slewing / approach / limit
+  const char *phase;  // disconnected / tracking / guiding / slewing / approach / limit / stopped
   long counts;        // raw position register
   double axisHa;      // register in degrees (= hour angle + offset())
   double axisRa;      // ra_current

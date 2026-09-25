@@ -1,5 +1,10 @@
 # OnStep front-end: the command subset
 
+**Status (2026-09-26):** implemented in `src/onstep_server.cpp`, replacing the LX200 front-end.
+Tested with the real INDI OnStep driver against the ESP: connect, sync, GoTo there and back,
+guide pulses, moves, tracking off/on, time, location. Pier side reached INDI. The HIL guide soak
+passes on port 5001. Not yet tested: Ekos + PHD2 across a real flip, NINA (ASCOM).
+
 Goal: an OnStepX-compatible protocol front-end on the ESP, next to the LX200 one, so that
 INDI (Ekos, ASIAIR) and ASCOM (NINA) use their **OnStep drivers**. Those drivers understand
 pier side, meridian limits, backlash, PEC and park, which the generic LX200 protocol can't
@@ -90,11 +95,24 @@ Probed once and answered "none", which is fine:
 - **`:Sr17:23:60.00#`:** the driver rounds up to 60 seconds, so a seconds value of 60 must carry over.
 - Longitude as `DDD:MM:SS.ss`, 0–360, west positive.
 
-## To implement next
+## Implementation notes
 
-1. A front-end on its own TCP port (e.g. 5002), on the same axis API as `lx200_server`. The LX200 port stays unchanged.
-2. The tables above. Any other command gets `0`, except the string-reply ones listed.
-3. `:Gm#` and `:GU#` from the real flip flag and RA/DEC state.
-4. `:GXE9#`/`:GXEA#` from the east limit and the tracking stop. The matching set commands (`:SXE9`/`:SXEA`) change the window.
-5. Test with the real INDI driver against the ESP, then with Ekos + PHD2 (pier side after a flip), then NINA through the ASCOM OnStep driver.
-6. Later: PEC commands (record/play/status → the PEC design), GPS (`S` flag, site and time from the GPS), and horizon/overhead limits.
+- **It replaces the LX200 front-end** instead of sitting next to it: OnStepX is a superset of the
+  LX200 set. It is served on 5001 (the old port) and 9999.
+- **Also answered** for generic LX200 clients:
+  - `:U#` precision toggle: low `HH:MM.T` / `sDD*MM`, default `HH:MM:SS`, highest via `:GRH#`/`:GDH#`
+  - `:Gr#`/`:Gd#` target, `:GA#`/`:GZ#` alt/az, `:GS#` sidereal time
+  - `:CS#` sync without a reply, `:TQ#` sidereal
+- **Meridian limits:**
+  - `:GXE9#` = −east limit × 4 (minutes before the meridian allowed on the normal branch)
+  - `:GXEA#` = (TRACK_MAX − offset − 180) × 4 (minutes after the meridian on the flipped branch)
+  - With −30°: 120 and 92.
+- `:MS#` answers `9` (unspecified) without a target, and `:CM#` answers `E6#` if the sync is refused.
+- `:GU#` error digit: `7` (hardware fault) while the RA mount isn't connected.
+
+## Next
+
+1. Ekos + PHD2 across a real flip, to check that PHD2 flips its calibration from the pier side.
+2. NINA through the ASCOM OnStep driver.
+3. `:SXE9`/`:SXEA` to set the window from the client.
+4. PEC commands (record/play/status, see the PEC design), GPS (`S` flag, site and time), and horizon/overhead limits.

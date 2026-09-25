@@ -22,7 +22,7 @@ static const double APPROACH_RATE = 8;       // x sidereal
 static const uint32_t SLEW_TIMEOUT_MS = 20 * 60 * 1000;
 
 
-enum CmdType { GOTO, GOTO_HA, STOP, SYNC, GUIDE, GUIDE_END, HOME, SET_REGISTER, EAST_LIMIT };
+enum CmdType { GOTO, GOTO_HA, STOP, SYNC, GUIDE, GUIDE_END, HOME, SET_REGISTER, EAST_LIMIT, TRACK_OFF, TRACK_ON };
 struct Cmd {
   CmdType type;
   double value;
@@ -31,7 +31,7 @@ struct Cmd {
   uint32_t seq;
 };
 
-enum Mode { DISCONNECTED, TRACK, SLEW, HALT };  // HALT: stopped at TRACK_MAX
+enum Mode { DISCONNECTED, TRACK, SLEW, HALT };  // HALT: stopped (tracking off, or at TRACK_MAX)
 
 static QueueHandle_t queue;
 static SemaphoreHandle_t stateLock;
@@ -67,6 +67,7 @@ static void setPhase(const char *phase) {
   xSemaphoreTake(stateLock, portMAX_DELAY);
   st.phase = phase;
   st.slewing = mode == SLEW;
+  st.tracking = mode == TRACK;
   xSemaphoreGive(stateLock);
 }
 
@@ -267,8 +268,25 @@ static void handle(const Cmd &c) {
       } else if (st.guideEast || st.guideWest) {
         esp_timer_stop(guideTimer);
         endGuiding();
-      } else {
+      } else if (mode == TRACK) {
         startTracking();
+      }  // HALT: stays stopped (tracking off is not undone by a halt)
+      break;
+    case TRACK_OFF:
+      if (mode == SLEW) finishSlew("aborted", 0);
+      esp_timer_stop(guideTimer);
+      sw::stopSoft(AXIS);
+      sw::waitStopped(AXIS);
+      st.guideEast = st.guideWest = false;
+      trackT1 = siderealT1;
+      mode = HALT;
+      setPhase("stopped");
+      logf("ra: tracking off");
+      break;
+    case TRACK_ON:
+      if (mode == HALT) {
+        startTracking();
+        logf("ra: tracking on");
       }
       break;
     case SYNC: {
@@ -402,6 +420,8 @@ void guide(char dir, int ms) { post(GUIDE, 0, dir, ms); }
 void setHome() { post(HOME); }
 void setRegister(double ha) { post(SET_REGISTER, ha); }
 void gotoHa(double ha) { post(GOTO_HA, ha); }
+
+void setTracking(bool on) { post(on ? TRACK_ON : TRACK_OFF); }
 
 void setEastLimit(double deg) {
   deg = constrain(deg, -90.0, 0.0);

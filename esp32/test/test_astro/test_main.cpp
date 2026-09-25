@@ -98,6 +98,70 @@ void test_sync_keeps_branch() {
   TEST_ASSERT_TRUE(ok);
 }
 
+// What the INDI OnStep driver actually sends (tools/onstep/capture-indi-2.2.0.log)
+void test_onstep_parsing() {
+  double v;
+  TEST_ASSERT_TRUE(parseOnStepRa("17:30:00.00#", v));
+  TEST_ASSERT_DOUBLE_WITHIN(1e-9, 262.5, v);
+  TEST_ASSERT_TRUE(parseOnStepRa("17:23:60.00#", v));  // driver rounding: 60 s carries
+  TEST_ASSERT_DOUBLE_WITHIN(1e-9, 261.0, v);
+  TEST_ASSERT_TRUE(parseOnStepRa("05:35:17#", v));
+  TEST_ASSERT_DOUBLE_WITHIN(1e-9, 83.8208333333, v);
+  TEST_ASSERT_TRUE(parseOnStepRa("05:35.3#", v));  // low precision HH:MM.T
+  TEST_ASSERT_DOUBLE_WITHIN(1e-9, 83.825, v);
+  TEST_ASSERT_FALSE(parseOnStepRa("25:00:00#", v));
+  TEST_ASSERT_FALSE(parseOnStepRa("17:30:00", v));  // no '#'
+  TEST_ASSERT_TRUE(parseOnStepDec("+10*00:00.0#", v));
+  TEST_ASSERT_DOUBLE_WITHIN(1e-9, 10, v);
+  TEST_ASSERT_TRUE(parseOnStepDec("-05*30:36#", v));
+  TEST_ASSERT_DOUBLE_WITHIN(1e-9, -5.51, v);
+  TEST_ASSERT_TRUE(parseOnStepDec("+45*30#", v));
+  TEST_ASSERT_DOUBLE_WITHIN(1e-9, 45.5, v);
+  TEST_ASSERT_FALSE(parseOnStepDec("+95*00:00#", v));
+  TEST_ASSERT_TRUE(parseOnStepLat("+40:52:22.08#", v));
+  TEST_ASSERT_DOUBLE_WITHIN(1e-6, 40.8728, v);
+  TEST_ASSERT_TRUE(parseOnStepLon("345:33:44.28#", v));  // Meade west-positive 0..360
+  TEST_ASSERT_DOUBLE_WITHIN(1e-6, 14.4377, v);
+  TEST_ASSERT_TRUE(parseOnStepLon("-014*26#", v));
+  TEST_ASSERT_DOUBLE_WITHIN(1e-6, 14.43333333, v);
+  TEST_ASSERT_TRUE(parseOnStepUtcOffset("-02:00#", v));
+  TEST_ASSERT_DOUBLE_WITHIN(1e-9, -2, v);
+  TEST_ASSERT_TRUE(parseOnStepUtcOffset("+05.5#", v));
+  TEST_ASSERT_DOUBLE_WITHIN(1e-9, 5.5, v);
+  int a, b, c;
+  TEST_ASSERT_TRUE(parseOnStepTime("03:00:00#", a, b, c));
+  TEST_ASSERT_EQUAL_INT(3, a);
+  TEST_ASSERT_TRUE(parseOnStepTime("23:59:59.6#", a, b, c));
+  TEST_ASSERT_EQUAL_INT(0, a);  // rounds to midnight
+  TEST_ASSERT_TRUE(parseOnStepDate("09/26/26#", a, b, c));
+  TEST_ASSERT_EQUAL_INT(26, c);
+  TEST_ASSERT_TRUE(parseOnStepDate("09/26/2026#", a, b, c));
+  TEST_ASSERT_EQUAL_INT(26, c);
+  TEST_ASSERT_FALSE(parseOnStepDate("13/26/26#", a, b, c));
+}
+
+void test_onstep_formatting() {
+  char b[24];
+  formatRaHigh(262.5, b, sizeof(b));
+  TEST_ASSERT_EQUAL_STRING("17:30:00.0000", b);
+  formatRaHigh(359.9999999999, b, sizeof(b));
+  TEST_ASSERT_EQUAL_STRING("00:00:00.0000", b);  // never "24:00:00" or ":60"
+  formatDecHigh(-5.51, b, sizeof(b));
+  TEST_ASSERT_EQUAL_STRING("-05*30:36.000", b);
+  formatDecHigh(10.99999999999, b, sizeof(b));
+  TEST_ASSERT_EQUAL_STRING("+11*00:00.000", b);
+  formatSite(40.8728, 2, false, b, sizeof(b));
+  TEST_ASSERT_EQUAL_STRING("+40*52", b);
+  formatSite(-14.4377, 3, true, b, sizeof(b));
+  TEST_ASSERT_EQUAL_STRING("-014*26:15.720", b);
+  // round trip through the parser
+  double v;
+  formatRaHigh(123.456789, b, sizeof(b));
+  strcat(b, "#");
+  TEST_ASSERT_TRUE(parseOnStepRa(b, v));
+  TEST_ASSERT_DOUBLE_WITHIN(1e-5, 123.456789, v);
+}
+
 void test_hms_matches_lx200() {
   for (size_t i = 0; i < N(HMS_CASES); i++) {
     int h, m, s;
@@ -180,6 +244,8 @@ int main() {
   RUN_TEST(test_meridian_flip_matches_lx200);
   RUN_TEST(test_east_limit_window);
   RUN_TEST(test_sync_keeps_branch);
+  RUN_TEST(test_onstep_parsing);
+  RUN_TEST(test_onstep_formatting);
   RUN_TEST(test_hms_matches_lx200);
   RUN_TEST(test_dec_steps_match_lx200);
   RUN_TEST(test_parse_and_format);

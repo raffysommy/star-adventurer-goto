@@ -81,6 +81,24 @@ bool parseSG(const char *cmd, double &hoursToUtc);  // :SGsHH.H#  (local + value
 bool parseSL(const char *cmd, int &h, int &m, int &s);        // :SLHH:MM:SS#
 bool parseSC(const char *cmd, int &mo, int &d, int &yy);      // :SCMM/DD/YY#
 
+// ---------------------------------------------------------------- OnStep formats
+// OnStep clients send high-precision values ("17:30:00.00", "+40:52:22.08",
+// "345:33:44.28") and even "17:23:60.00" (the INDI driver rounds up to 60 s).
+// parseSexagesimal reads "[s]A<sep>B[<sep>C[.c]]" or "[s]A<sep>B.b" up to the '#' that
+// must follow; sep is ':', '*', '\'' or the 0xDF degree sign. Seconds up to 60 carry.
+bool parseSexagesimal(const char *p, double &value);
+bool parseOnStepRa(const char *p, double &raDeg);        // "HH:MM:SS[.s]#" (or HH:MM.T#)
+bool parseOnStepDec(const char *p, double &decDeg);      // "sDD*MM[:SS[.s]]#"
+bool parseOnStepLat(const char *p, double &lat);         // "sDD*MM[:SS[.s]]#"
+bool parseOnStepLon(const char *p, double &lonEast);     // Meade west-positive, 0..360 or signed
+bool parseOnStepUtcOffset(const char *p, double &hoursToUtc);  // "sHH[:MM]#" or "sHH.H#"
+bool parseOnStepTime(const char *p, int &h, int &m, int &s);   // "HH:MM:SS[.s]#"
+bool parseOnStepDate(const char *p, int &mo, int &d, int &yy); // "MM/DD/YY#" or "MM/DD/YYYY#"
+// Without the trailing '#'
+void formatRaHigh(double deg, char *out, int outLen);    // "HH:MM:SS.SSSS"
+void formatDecHigh(double deg, char *out, int outLen);   // "sDD*MM:SS.SSS"
+void formatSite(double deg, int degDigits, bool high, char *out, int outLen);  // "sDD*MM" / "sDDD*MM:SS.SSS"
+
 // Unix time from a civil UTC date/time (proleptic Gregorian)
 int64_t unixFromCivil(int year, int month, int day, int h, int m, int s);
 

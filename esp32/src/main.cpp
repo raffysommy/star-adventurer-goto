@@ -12,7 +12,8 @@
 #include "clock.h"
 #include "dashboard.h"
 #include "dec_axis.h"
-#include "lx200_server.h"
+#include "mount.h"
+#include "onstep_server.h"
 #include "mount_usb.h"
 #include "netlog.h"
 #include "ra_axis.h"
@@ -229,7 +230,8 @@ void setup() {
   dec::setBacklash(settings.decBacklash);
   dec::begin();
   dec::setInverted(settings.pierEast, true);
-  lx200::begin();
+  mount::begin();
+  onstep::begin();
 
   // A hang (e.g. starved idle tasks) reboots instead of silently killing Wi-Fi
   esp_task_wdt_config_t wdt = {.timeout_ms = 15000, .idle_core_mask = 0b11, .trigger_panic = true};
@@ -257,7 +259,8 @@ void setup() {
   }
 
   esp_ota_mark_app_valid_cancel_rollback();
-  logf("ready: http://%s.local  lx200 :%u  telnet log :23  synscan udp :11880", HOSTNAME, settings.lx200Port);
+  logf("ready: http://%s.local  onstep/lx200 :%u :9999  telnet log :23  synscan udp :11880", HOSTNAME,
+       settings.lx200Port);
 }
 
 void loop() {

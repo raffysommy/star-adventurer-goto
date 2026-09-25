@@ -234,6 +234,133 @@ bool parseSC(const char *cmd, int &mo, int &d, int &yy) {
          expect(p, '#') && mo >= 1 && mo <= 12 && d >= 1 && d <= 31;
 }
 
+// ---------------------------------------------------------------- OnStep formats
+
+static bool sexSep(const char *&p) {
+  if (*p == ':' || *p == '*' || *p == '\'' || (unsigned char)*p == 0xDF) {
+    p++;
+    return true;
+  }
+  return false;
+}
+
+// Unsigned decimal number; integer part required
+static bool number(const char *&p, double &v, bool &hadFraction) {
+  const char *start = p;
+  v = 0;
+  while (*p >= '0' && *p <= '9') v = v * 10 + (*p++ - '0');
+  if (p == start) return false;
+  hadFraction = false;
+  if (*p == '.') {
+    p++;
+    double scale = 0.1;
+    while (*p >= '0' && *p <= '9') {
+      v += (*p++ - '0') * scale;
+      scale /= 10;
+    }
+    hadFraction = true;
+  }
+  return true;
+}
+
+bool parseSexagesimal(const char *p, double &value) {
+  int sign = optSign(p);
+  double a, b, c = 0;
+  bool fa, fb, fc;
+  if (!number(p, a, fa) || fa || !sexSep(p) || !number(p, b, fb) || b >= 60) return false;
+  if (!fb && sexSep(p)) {
+    if (!number(p, c, fc) || c > 60) return false;
+  }
+  if (*p != '#') return false;
+  value = sign * (a + b / 60.0 + c / 3600.0);
+  return true;
+}
+
+bool parseOnStepRa(const char *p, double &raDeg) {
+  double h;
+  if (*p == '-' || *p == '+' || !parseSexagesimal(p, h) || h < 0 || h > 24) return false;
+  raDeg = wrap360(h * 15.0);
+  return true;
+}
+
+bool parseOnStepDec(const char *p, double &decDeg) {
+  double d;
+  if (!parseSexagesimal(p, d) || fabs(d) > 90) return false;
+  decDeg = d;
+  return true;
+}
+
+bool parseOnStepLat(const char *p, double &lat) { return parseOnStepDec(p, lat); }
+
+bool parseOnStepLon(const char *p, double &lonEast) {
+  double w;
+  if (!parseSexagesimal(p, w) || fabs(w) > 360) return false;
+  double east = wrap360(-w);
+  if (east > 180) east -= 360;
+  lonEast = east;
+  return true;
+}
+
+bool parseOnStepUtcOffset(const char *p, double &hoursToUtc) {
+  double v;
+  if (parseSexagesimal(p, v)) {
+    hoursToUtc = v;
+    return fabs(v) <= 14;
+  }
+  char *end;
+  v = strtod(p, &end);
+  if (end == p || *end != '#' || fabs(v) > 14) return false;
+  hoursToUtc = v;
+  return true;
+}
+
+bool parseOnStepTime(const char *p, int &h, int &m, int &s) {
+  double v;
+  if (*p == '-' || *p == '+' || !parseSexagesimal(p, v) || v >= 24) return false;
+  long t = lround(v * 3600) % 86400;
+  h = t / 3600;
+  m = t / 60 % 60;
+  s = t % 60;
+  return true;
+}
+
+bool parseOnStepDate(const char *p, int &mo, int &d, int &yy) {
+  int y;
+  if (!digits(p, 2, mo) || !expect(p, '/') || !digits(p, 2, d) || !expect(p, '/')) return false;
+  const char *q = p;
+  if (digits(q, 4, y) && *q == '#') {
+    yy = y % 100;
+  } else if (digits(p, 2, y) && *p == '#') {
+    yy = y;
+  } else {
+    return false;
+  }
+  return mo >= 1 && mo <= 12 && d >= 1 && d <= 31;
+}
+
+void formatRaHigh(double deg, char *out, int outLen) {
+  long long t = llround(wrap360(deg) / 15.0 * 3600.0 * 10000.0) % (24LL * 3600 * 10000);  // 1e-4 s
+  snprintf(out, outLen, "%02lld:%02lld:%02lld.%04lld", t / 36000000, t / 600000 % 60, t / 10000 % 60, t % 10000);
+}
+
+void formatDecHigh(double deg, char *out, int outLen) {
+  long long t = llround(fabs(deg) * 3600.0 * 1000.0);  // 1e-3 arcsec
+  snprintf(out, outLen, "%c%02lld*%02lld:%02lld.%03lld", deg < 0 ? '-' : '+', t / 3600000, t / 60000 % 60,
+           t / 1000 % 60, t % 1000);
+}
+
+void formatSite(double deg, int degDigits, bool high, char *out, int outLen) {
+  char sign = deg < 0 ? '-' : '+';
+  if (high) {
+    long long t = llround(fabs(deg) * 3600.0 * 1000.0);
+    snprintf(out, outLen, "%c%0*lld*%02lld:%02lld.%03lld", sign, degDigits, t / 3600000, t / 60000 % 60,
+             t / 1000 % 60, t % 1000);
+  } else {
+    long t = lround(fabs(deg) * 60.0);
+    snprintf(out, outLen, "%c%0*ld*%02ld", sign, degDigits, t / 60, t % 60);
+  }
+}
+
 // Howard Hinnant's days_from_civil
 int64_t unixFromCivil(int year, int month, int day, int h, int m, int s) {
   year -= month <= 2;

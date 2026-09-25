@@ -6,7 +6,9 @@ controller:
 
 - **RA**: the Star Adventurer's own motor, over USB (the ESP is the USB host)
 - **DEC**: the NEMA17 stepper on an EasyDriver, driven directly
-- **Clients**: Meade LX200 over Wi-Fi (INDI "LX200 GPS", Stellarium, ...), plus a web dashboard
+- **Clients**: OnStep protocol over Wi-Fi, a superset of Meade LX200. INDI/Ekos and ASIAIR use their
+  OnStep driver (pier side, meridian limits, backlash), NINA the ASCOM OnStep driver, and
+  Stellarium, SkySafari and generic LX200 drivers work too. Plus a web dashboard.
 
 ## Hardware
 
@@ -53,11 +55,11 @@ Wi-Fi interface (`curl --interface wlo1`, `STARMOUNT_IFACE=wlo1` for the tests).
 
 | Port / path | What |
 |---|---|
-| TCP 5001 | LX200 (same replies as `lx200.py`, so existing client setups keep working) |
+| TCP 5001, 9999 | OnStepX-compatible commands (LX200 superset): see [docs/onstep-protocol.md](docs/onstep-protocol.md). 5001 is the old `lx200.py` port, 9999 OnStep's usual one |
 | `http://starmount.local/` | Dashboard: RA/DEC, state, LST, clock, settings, DEC test buttons |
 | `/api/status` | JSON state (used by the dashboard and the tests) |
 | `/api/settings`, `/api/time`, `/api/home`, `/api/stop` | Settings, set clock from the browser, set RA home, stop |
-| `/api/lx200?c=:GR` | Run one LX200 command over HTTP |
+| `/api/lx200?c=:GR` | Run one OnStep/LX200 command over HTTP |
 | `/api/register`, `/api/goto_ha`, `/api/dec` | Debug: redefine the RA register, slew to a register angle, DEC test moves |
 | `/log`, telnet 23 | Log (kept across resets: after a crash `/log` still shows the previous boot) |
 | `/sys`, `/cmd?c=:e1`, `/update`, `/wifi` | System status, raw mount command, firmware upload, Wi-Fi setup |
@@ -66,18 +68,21 @@ Wi-Fi interface (`curl --interface wlo1`, `STARMOUNT_IFACE=wlo1` for the tests).
 ## Architecture
 
 ```
- clients:  INDI / Stellarium / PHD2        browser            (later: OAT tools)
-               │ LX200 TCP 5001               │ HTTP                 │
- ┌─────────────┴──────────────┐   ┌───────────┴───────┐   ┌──────────┴─────────┐
- │ lx200_server               │   │ dashboard         │   │ (OAT protocol)     │  protocol
- │ commands → targets, flip,  │   │ JSON API          │   │ front-end          │  front-ends
- │ DEC reversal, pulse guide  │   │                   │   │                    │
- └──────┬──────────────┬──────┘   └───────────────────┘   └────────────────────┘
+ clients:  INDI / NINA / ASIAIR / Stellarium / PHD2           browser
+               │ OnStep (LX200 superset), TCP 5001 + 9999    │ HTTP
+ ┌─────────────┴──────────────┐                  ┌───────────┴───────┐
+ │ onstep_server              │                  │ dashboard         │  protocol
+ │ parse, reply formats       │                  │ JSON API          │  front-ends
+ └─────────────┬──────────────┘                  └───────────────────┘
+ ┌─────────────┴──────────────┐
+ │ mount: target, flip branch,│  one flip flag for the whole mount
+ │ DEC reversal, guide, sync  │
+ └──────┬──────────────┬──────┘
         │              │
  ┌──────┴──────┐ ┌─────┴──────┐        ┌───────────────────────────────┐
  │ ra_axis     │ │ dec_axis   │        │ lib/core/astro (pure C++)     │  pure logic,
  │ task + queue│ │ FastAccel- │ ◄────► │ LST, HA/RA, meridian flip,    │  host-tested
- │ tracking,   │ │ Stepper    │        │ DEC steps, LX200 parse/format │
+ │ tracking,   │ │ Stepper    │        │ DEC steps, OnStep parse/format│
  │ goto, guide │ └─────┬──────┘        └───────────────────────────────┘
  └──────┬──────┘       │
  ┌──────┴──────┐       │           services: clock (NTP / LX200 / browser → later GPS),
@@ -96,15 +101,15 @@ Design rules:
   Everything else posts requests to its queue, so commands can't interleave (that was
   `lx200.py`'s `ra_locker` and its "junk data" workarounds). `mount_usb` serializes the
   request/response pairs underneath.
-- **Protocols are thin front-ends.** `lx200_server` turns commands into axis calls and keeps
-  the protocol-level state (target, meridian-flip flag). An OpenAstroMount/OAT-compatible
-  front-end would sit next to it on the same axis API.
+- **Protocols are thin front-ends.** `onstep_server` only parses and formats. The mount-level
+  state (target, meridian-flip branch, guide flags) lives in `mount`, shared by every
+  front-end, so there is one flip flag whatever the client.
 - **Math lives in `lib/core`** with no Arduino dependencies. It is unit-tested on the PC against
   golden values produced by `lx200.py`'s own functions (`test/gen_golden.py`).
 - **Guiding is never disturbed.** Pulses change only the RA step period while the motor keeps
   running. DEC pulses are exact step moves. Recovery from firmware auto-stops uses a bare
   `J`, never a stop/restart.
-- **Cores:** Wi-Fi, lwIP and USB host on core 0; RA/DEC/LX200 on core 1. DEC step pulses come from hardware.
+- **Cores:** Wi-Fi, lwIP and USB host on core 0; RA/DEC/OnStep server on core 1. DEC step pulses come from hardware.
 
 Planned additions: GPS (time, site, magnetic declination), a 9-axis IMU in the base box
 (polar axis altitude and heading) and a 6-axis IMU on the camera hot shoe (mechanical pose,
@@ -131,6 +136,9 @@ push-to, pier side, safety limits), plus fast polar alignment in tiers from sky-
 - `:SG/:SL/:SC` set the clock (the Pi had its own). `:Sg/:St` parse signs correctly. `:GG` uses the
   Meade sign convention.
 - `:MS`/`:CM` without a prior valid `:Sr` don't move or sync RA.
+- **The protocol is OnStepX's** (since 2026-09-26), not `lx200.py`'s dialect. Set commands answer
+  `1`/`0`, `:CM` answers `N/A#`, stops and pulses answer nothing, and `:GVP#` is `On-Step`.
+  Standard LX200 clients don't notice. Tracking can be turned off (`:Td`/`:Te`).
 - DEC guide pulses are exact step counts, not timed stops (those overshot by the queued steps).
 - RA guide/slow-move directions follow ASCOM/EQMOD: west = 1.5×, east = 0.5× sidereal (`lx200.py`
   had them swapped). Redo PHD2 calibration made with the old firmware.

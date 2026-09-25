@@ -9,7 +9,7 @@ struct Settings {
   bool decAxisReversed = false;  // DEC_AXIS_REVERSED
   bool flipRaGuiding = false;    // FLIP_RA_GUIDING_ON_MERIDIAN
   bool pierEast = false;         // PIER_EAST_SIDE: inverts the DEC motor direction (:CP)
-  uint16_t lx200Port = 5001;     // SERVER_PORT
+  uint16_t lx200Port = 5001;     // SERVER_PORT (OnStep/LX200 commands; 9999 is served too)
   double raEastLimit = 0;        // HA where the RA register window starts (deg, <= 0); see ra::offset()
   int32_t decBacklash = 250;     // DEC gear play in steps (plate-solve measured ~250-270)
 };

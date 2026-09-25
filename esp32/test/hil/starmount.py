@@ -48,16 +48,17 @@ def post(path, **data):
 
 
 class LX200:
-    """Minimal LX200 client. Commands that get no '#'-terminated reply are listed
-    in NO_HASH; pulse-guide replies ("0") are left unread, like PHD2 does."""
-    NO_HASH = (':Sg', ':St', ':MS', ':SL', ':SC', ':SG')
+    """Minimal LX200/OnStep client. Replies follow OnStepX: set commands answer a
+    single '1'/'0' (NO_HASH), moves, stops and pulses answer nothing (NO_REPLY)."""
+    NO_HASH = (':Sr', ':Sd', ':Sg', ':St', ':MS', ':SL', ':SC', ':SG', ':Te', ':Td', ':hR')
+    NO_REPLY = (':Q', ':R', ':U', ':Mg', ':Mn', ':Ms', ':Me', ':Mw')
 
     def __init__(self):
         self.s = _connect(LX200_PORT, timeout=2)
 
     def cmd(self, c):
         self.s.sendall(c.encode('latin1'))
-        if c.startswith(':M') and not c.startswith(':MS'):
+        if c.startswith(self.NO_REPLY):
             time.sleep(0.05)
             return ''
         data = b''
@@ -71,7 +72,7 @@ class LX200:
         return data.decode('latin1')
 
     def drain(self):
-        """Discard replies left unread (pulse-guide acknowledgements)."""
+        """Discard replies left unread (none expected with the OnStep front-end)."""
         self.s.settimeout(0.2)
         try:
             while self.s.recv(256):
