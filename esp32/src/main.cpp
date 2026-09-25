@@ -226,8 +226,9 @@ void setup() {
   webBegin();
   synscanUdpBegin();  // raw motor access for debugging; don't use while the RA task is driving
   ra::begin();
+  dec::setBacklash(settings.decBacklash);
   dec::begin();
-  dec::setInverted(settings.pierEast);
+  dec::setInverted(settings.pierEast, true);
   lx200::begin();
 
   // A hang (e.g. starved idle tasks) reboots instead of silently killing Wi-Fi

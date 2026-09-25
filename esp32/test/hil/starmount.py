@@ -15,7 +15,7 @@ HOST = os.environ.get('STARMOUNT_HOST', 'starmount.local')
 IFACE = os.environ.get('STARMOUNT_IFACE')
 LX200_PORT = 5001
 SIDEREAL_COUNTS = 144.96  # RA register counts per second at sidereal rate
-DEC_GUIDE_STEPS = 6.796   # DEC steps per second at guide rate
+DEC_GUIDE_STEPS = 1.699   # DEC steps per second at guide rate (0.5x sidereal)
 
 
 def _connect(port, timeout=5):

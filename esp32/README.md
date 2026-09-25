@@ -132,8 +132,33 @@ push-to, pier side, safety limits), plus fast polar alignment in tiers from sky-
   Meade sign convention.
 - `:MS`/`:CM` without a prior valid `:Sr` don't move or sync RA.
 - DEC guide pulses are exact step counts, not timed stops (those overshot by the queued steps).
+- DEC guide rate is 0.5× sidereal (1.7 steps/s). `lx200.py`'s "sidereal" 6.796 steps/s was really 2×.
+- DEC backlash is compensated (below), and DEC GoTos always end moving north (+steps).
 - The RA register survives ESP restarts (read back from the mount). The DEC position survives soft
   resets and OTA (kept in RAM). After a power-on DEC starts at 0° (146400 steps), as `lx200.py` did.
+
+## Measured on the sky (2026-09-25, plate solves through a window)
+
+M50 + 70-200 @ 200 mm (3.9″/px), astrometry.net 4100 indexes, scripts in `tools/sky/` (prototypes: ESP IP and `wlo1` are hard-coded in `pa.py`; run them from `$HOME`, gphoto2 is a snap)
+(`pa.py`: polar alignment from two solves around an RA move; `mount_tests.py`: DEC, sync,
+GoTo, guide, drift; `pe_record.py`: RA drift from live-view frames, no shutter).
+
+| What | Result |
+|---|---|
+| DEC backlash | ~250 steps (0.30–0.34°) on every reversal, reproducible |
+| DEC scale | 805 steps/° on one clean move (nominal 813.3) |
+| RA/DEC orthogonality | 89.8° |
+| RA GoTo after sync | 0.5–3′ (limited by the RA drift below) |
+| DEC GoTo after sync | before: ~1′ if ending north, 17–18′ if ending south; with compensation: 0.4–1.4′ both ways |
+| DEC guide pulses | before: the first ~4 pulses after a reversal did nothing; now the first one overshoots ~2× once, then settles |
+| RA guide pulses | 0.45–0.6× sidereal (nominal 0.5×) |
+| RA tracking (unguided, 10 min) | register exactly sidereal, but the sky wanders ±60″ (127″ p-p) — mechanical |
+
+**DEC backlash model.** `dec_axis` keeps the motor position and the gear output apart: the gear
+sits within `[motor − backlash, motor]` and only moves when pushed. Everything reported and
+targeted is the gear position. On a reversal the play is run out at slew speed (guide pulses
+included, so PHD2 sees no dead zone). `backlash` is a setting (dashboard, NVS key `dec_bl`,
+default 250 steps); lowering it softens the one-pulse overshoot after a reversal.
 
 ## Tests
 

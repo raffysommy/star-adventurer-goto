@@ -10,6 +10,7 @@ struct Settings {
   bool flipRaGuiding = false;    // FLIP_RA_GUIDING_ON_MERIDIAN
   bool pierEast = false;         // PIER_EAST_SIDE: inverts the DEC motor direction (:CP)
   uint16_t lx200Port = 5001;     // SERVER_PORT
+  int32_t decBacklash = 250;     // DEC gear play in steps (plate-solve measured ~250-270)
 };
 
 extern Settings settings;

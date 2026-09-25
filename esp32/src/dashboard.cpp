@@ -58,6 +58,7 @@ input[type=number]{width:9em}
 <label><input type="checkbox" id="dec_axis_reversed"> DEC_AXIS_REVERSED</label>
 <label><input type="checkbox" id="flip_ra_guiding"> FLIP_RA_GUIDING_ON_MERIDIAN</label>
 <label><input type="checkbox" id="pier_east"> PIER_EAST_SIDE (inverts DEC motor)</label>
+<label>DEC backlash (steps) <input type="number" step="1" min="0" id="dec_backlash"></label>
 <label>Latitude <input type="number" step="0.0001" id="lat"> Longitude (east +) <input type="number" step="0.0001" id="lon"></label>
 <button onclick="saveSettings()">Apply settings</button>
 </div>
@@ -80,11 +81,11 @@ $("clock").className="value"+(s.clock_valid?"":" warn");
 $("stalls").textContent=s.stalls+" / "+s.kicks+" / "+s.keep_alives;
 if(!s.clock_valid&&!autoTime){autoTime=true;post("/api/time",timeBody())}
 if(!init){$("dec_axis_reversed").checked=s.dec_axis_reversed;$("flip_ra_guiding").checked=s.flip_ra_guiding;$("pier_east").checked=s.pier_east;
-$("lat").value=s.lat;$("lon").value=s.lon;init=true}
+$("lat").value=s.lat;$("lon").value=s.lon;$("dec_backlash").value=s.dec_backlash;init=true}
 }catch(e){$("state").textContent="Web connection error"}}
 function dec(action,args){post("/api/dec",new URLSearchParams({action,...args}))}
 async function saveSettings(){await post("/api/settings",new URLSearchParams({
-dec_axis_reversed:$("dec_axis_reversed").checked?"1":"0",flip_ra_guiding:$("flip_ra_guiding").checked?"1":"0",pier_east:$("pier_east").checked?"1":"0",
+dec_axis_reversed:$("dec_axis_reversed").checked?"1":"0",flip_ra_guiding:$("flip_ra_guiding").checked?"1":"0",pier_east:$("pier_east").checked?"1":"0",dec_backlash:$("dec_backlash").value,
 lat:$("lat").value,lon:$("lon").value}));init=false}
 refresh();setInterval(refresh,1000);
 </script></body></html>)HTML";
@@ -116,14 +117,14 @@ static void sendStatus() {
            "\"axis_ra\":%.6f,\"axis_ha\":%.6f,\"counts\":%ld,\"ra_target\":%.6f,\"lst\":%.6f,\"lst_hms\":\"%s\","
            "\"clock\":%.3f,\"clock_valid\":%s,\"clock_source\":\"%s\",\"utc_offset\":%.2f,\"lat\":%.4f,\"lon\":%.4f,"
            "\"stalls\":%lu,\"kicks\":%lu,\"keep_alives\":%lu,\"lx200_clients\":%d,"
-           "\"dec_steps\":%ld,\"dec_target\":%ld,\"dec_moving\":%s,\"pier_east\":%s}",
+           "\"dec_steps\":%ld,\"dec_target\":%ld,\"dec_motor\":%ld,\"dec_backlash\":%ld,\"dec_moving\":%s,\"pier_east\":%s}",
            lx200::reportedRa().c_str(), lx200::reportedDec().c_str(), mountState(r, l).c_str(), r.phase,
            l.meridianFlipped ? "true" : "false", settings.decAxisReversed ? "true" : "false",
            settings.flipRaGuiding ? "true" : "false", (l.meridianFlipped ^ settings.decAxisReversed) ? "true" : "false",
            r.axisRa, r.axisHa, r.counts, l.raTarget, lst, lstHms, clockNow(), clockValid() ? "true" : "false",
            clockSource(), settings.utcOffset, settings.lat, settings.lonEast, (unsigned long)r.stalls,
            (unsigned long)r.kicks, (unsigned long)r.keepAlives, l.clients, dec::position(), dec::target(),
-           dec::moving() ? "true" : "false", settings.pierEast ? "true" : "false");
+           dec::motorPosition(), (long)settings.decBacklash, dec::moving() ? "true" : "false", settings.pierEast ? "true" : "false");
   srv->send(200, "application/json", buf);
 }
 
@@ -133,6 +134,10 @@ static void postSettings() {
   if (srv->hasArg("pier_east")) {
     settings.pierEast = srv->arg("pier_east") == "1";
     dec::setInverted(settings.pierEast);
+  }
+  if (srv->hasArg("dec_backlash") && srv->arg("dec_backlash").length()) {
+    settings.decBacklash = srv->arg("dec_backlash").toInt();
+    dec::setBacklash(settings.decBacklash);
   }
   if (srv->hasArg("lat") && srv->arg("lat").length()) settings.lat = srv->arg("lat").toDouble();
   if (srv->hasArg("lon") && srv->arg("lon").length()) settings.lonEast = srv->arg("lon").toDouble();
