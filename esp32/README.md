@@ -154,7 +154,8 @@ GoTo, guide, drift; `pe_record.py`: RA drift from live-view frames, no shutter).
 | DEC GoTo after sync | before: ~1′ if ending north, 17–18′ if ending south; with compensation: 0.4–1.4′ both ways |
 | DEC guide pulses | before: the first ~4 pulses after a reversal did nothing; now the first one overshoots ~2× once, then settles |
 | RA guide pulses | 0.45–0.6× sidereal (nominal 0.5×) |
-| RA tracking (unguided, 10 min) | register exactly sidereal, but the sky wanders ±60″ (127″ p-p) — mechanical |
+| RA tracking (unguided, 10 min, 1 frame/min) | register exactly sidereal, but the sky wanders ±60″ — mechanical |
+| RA periodic error (live view, 22 min, ~7 fps) | **±30″ sine at the worm period (~10 min)**, cycles correlate 0.89, 7″ rms non-periodic left. Max slope 0.3″/s: PHD2 + Predictive PEC; no firmware PEC (no worm index, phase lost at power-on) |
 
 **DEC backlash model.** `dec_axis` keeps the motor position and the gear output apart: the gear
 sits within `[motor − backlash, motor]` and only moves when pushed. Everything reported and
