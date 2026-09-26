@@ -35,6 +35,7 @@ static portMUX_TYPE gearMux = portMUX_INITIALIZER_UNLOCKED;
 
 static volatile bool slewPhase2 = false;  // after an overshoot, finish forward to targetPos
 static volatile int pendingRun = 0;       // guide(): start running once the play is taken up
+static volatile float runSpeed;
 
 // The stepper is open loop: keep its position across soft resets and OTA updates
 __NOINIT_ATTR static int32_t savedPos, savedGear;
@@ -118,8 +119,9 @@ void stop() {
   stepper->stopMove();
 }
 
-void guide(int dir) {
+void guide(int dir, float speed) {
   if (!stepper) return;
+  runSpeed = speed > 0 ? fminf(speed, SLEW_SPEED) : guideSpeed;
   if ((dir > 0 && position() >= limMax) || (dir < 0 && position() <= limMin)) {
     logf("dec: move REFUSED, at the axis limit");
     return;
@@ -136,7 +138,7 @@ void guide(int dir) {
     return;
   }
   pendingRun = 0;
-  stepper->setSpeedInMilliHz(milliHz(guideSpeed));
+  stepper->setSpeedInMilliHz(milliHz(runSpeed));
   if (stepper->isRunning()) stepper->applySpeedAcceleration();
   dir > 0 ? stepper->runForward() : stepper->runBackward();
 }
@@ -219,7 +221,7 @@ static void task(void *) {
     if (guideActive && pendingRun && !stepper->isRunning()) {
       int dir = pendingRun;
       pendingRun = 0;
-      stepper->setSpeedInMilliHz(milliHz(guideSpeed));
+      stepper->setSpeedInMilliHz(milliHz(runSpeed));
       dir > 0 ? stepper->runForward() : stepper->runBackward();
     } else if (guideActive && !stepper->isRunning()) {
       guideActive = pulseActive = false;  // pulse done

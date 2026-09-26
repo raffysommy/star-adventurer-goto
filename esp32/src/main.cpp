@@ -9,6 +9,7 @@
 #include <esp_ota_ops.h>
 #include <esp_task_wdt.h>
 
+#include "bootlog.h"
 #include "clock.h"
 #include "dashboard.h"
 #include "dec_axis.h"
@@ -123,7 +124,10 @@ static void handleRoot() {
                         : F("<a href='/usbhost?enable=1'>Enable USB host on next boot</a>");
   html += F(" | <a href=/reboot>reboot</a></p><script>async function r(){const s=await(await fetch('/api/status'))"
             ".json();t.innerHTML=Object.entries(s).map(([k,v])=>`<tr><td>${k}</td><td>${v}</td></tr>`).join('')}"
-            "r();setInterval(r,1000)</script></body></html>");
+            "r();setInterval(r,1000);fetch('/api/boots').then(x=>x.json()).then(b=>{bl.textContent="
+            "b.boots.map(x=>`#${x.no} ${x.at||'?'}  ${x.reason}  (previous ran ${x.previous_ran_s} s)`).join('\\n')+"
+            "'\\n\\nmount USB:\\n'+b.mount_usb.map(x=>`boot #${x.boot} +${x.uptime_s}s ${x.at||''} ${x.event}`).join('\\n')})"
+            "</script><h2>Boots and power</h2><pre id=bl></pre></body></html>");
   web.send(200, "text/html", html);
 }
 
@@ -159,6 +163,7 @@ static void handleWifi() {
     prefs.end();
     web.send(200, "text/plain", "saved, rebooting\n");
     delay(500);
+    bootlog::beforeRestart();
     ESP.restart();
   }
   String html = FPSTR(PAGE_HEAD);
@@ -192,6 +197,7 @@ static void handleUpdateDone() {
   web.send(ok ? 200 : 500, "text/plain", ok ? "OK, rebooting\n" : String("failed: ") + Update.errorString() + "\n");
   if (ok) {
     delay(500);
+    bootlog::beforeRestart();
     ESP.restart();
   }
 }
@@ -201,6 +207,7 @@ static void webBegin() {
   dashboardBegin(web);
   web.on("/api/status", [] { web.send(200, "application/json", jsonStatus()); });
   web.on("/api/tasks", [] { web.send(200, "application/json", jsonTasks()); });
+  web.on("/api/boots", [] { web.send(200, "application/json", bootlog::json()); });
   // Debug: feed NMEA sentences as if the GPS sent them (one per line, POST body "nmea")
   web.on("/api/gps_nmea", HTTP_POST, [] {
     String body = web.arg("nmea");
@@ -233,6 +240,7 @@ static void webBegin() {
   web.on("/reboot", [] {
     web.send(200, "text/plain", "rebooting\n");
     delay(500);
+    bootlog::beforeRestart();
     ESP.restart();
   });
   web.begin();
@@ -247,7 +255,10 @@ static void otaBegin() {
   ArduinoOTA.setPassword(OTA_PASS);
 #endif
   ArduinoOTA.onStart([] { logf("ota: start"); });
-  ArduinoOTA.onEnd([] { logf("ota: done, rebooting"); });
+  ArduinoOTA.onEnd([] {
+    logf("ota: done, rebooting");
+    bootlog::beforeRestart();
+  });
   ArduinoOTA.onError([](ota_error_t e) { logf("ota: error %u", e); });
   ArduinoOTA.begin();  // also starts mDNS as starmount.local
 }
@@ -262,6 +273,7 @@ void setup() {
   logf("StarMount booting from %s, built " __DATE__ " " __TIME__, part ? part->label : "?");
 
   settingsLoad();
+  bootlog::begin();
   wifiBegin();
   clockBegin();
   otaBegin();
@@ -310,5 +322,6 @@ void loop() {
   ArduinoOTA.handle();
   web.handleClient();
   netlogLoop();
+  bootlog::tick();
   delay(2);
 }

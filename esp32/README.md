@@ -62,6 +62,7 @@ Wi-Fi interface (`curl --interface wlo1`, `STARMOUNT_IFACE=wlo1` for the tests).
 | `/api/lx200?c=:GR` | Run one OnStep/LX200 command over HTTP |
 | `/api/register`, `/api/goto_ha`, `/api/dec` | Debug: redefine the RA register, slew to a register angle, DEC test moves |
 | TCP 10110 | NMEA over TCP: the GPS sentences, for INDI's "GPS NMEA" driver (KStars/Ekos time and location) |
+| `/api/boots` | The last 10 boots (reset reason, how long the previous boot ran) and mount USB connects/disconnects, in NVS |
 | `/api/tasks`, `/api/gps_nmea` | Per-task CPU/stack/heap; inject NMEA sentences (debug, no GPS needed) |
 | `/log`, telnet 23 | Log (kept across resets: after a crash `/log` still shows the previous boot) |
 | `/sys`, `/cmd?c=:e1`, `/update`, `/wifi` | System status, raw mount command, firmware upload, Wi-Fi setup |
@@ -234,6 +235,23 @@ default 250 steps); lowering it softens the one-pulse overshoot after a reversal
   - A table recorded with a different segment count (it changed from 599 to 598 with true
     sidereal) is not loaded: record again.
 
+## Manual moves and boot log (2026-09-27)
+
+- **Manual moves** use OnStep's `:R0`–`:R9` (0.25×, 0.5×, 1×, 2×, 4×, 8×, 20×, 48×, half max, max;
+  Meade `:RG :RC :RM :RS`):
+  - RA below 1× changes only the tracking speed.
+  - RA from 1×, the motor runs west (forward) or east (reversed) with the slew keep-alive.
+    Max is ~64× measured, half max ~32×.
+  - After a reversal the SA auto-stops once, and the tracking watchdog restarts it within seconds.
+  - DEC runs up to 256× with the backlash take-up and axis limits.
+  - Moves stop at the register limits, and abort a PEC recording.
+- **Boot log** (`/api/boots`, shown on `/sys`), in NVS:
+  - the last 10 boots: reset reason (`BROWNOUT` = rail sag, `power-on` = supply off), and how
+    long the previous boot ran (saved every 5 min)
+  - the last 10 mount USB connects/disconnects
+  - Flash wear: one record per boot or event, plus 288 small writes a day.
+- The PEC phase is now saved every 30 s, and only while a table exists.
+
 ## Tests
 
 - `pio test -e native`: astro math, DEC steps, parsing. Regenerate golden values with
@@ -248,6 +266,7 @@ default 250 steps); lowering it softens the one-pulse overshoot after a reversal
   - `features_test.py`: tracking rates, refraction, guide rate, backlash, DEC axis limits and
     the strict PEC rule (~3 min, small moves)
   - `rate_calibration.py`: RA register rate vs raw T1, timed on the ESP (~2.5 min per point)
+  - `move_test.py`: manual-move speeds `:R0`–`:R9` on both axes (small moves, ~1 min)
 
   ```sh
   cd test/hil && STARMOUNT_HOST=starmount.local STARMOUNT_IFACE=wlo1 python3 guide_soak.py

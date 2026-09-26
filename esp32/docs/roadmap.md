@@ -25,8 +25,8 @@ What's done, what to test on the sky, what to build next. The details are in
 
 ## Next clear night (no new hardware)
 
-1. **Re-sync first.** The RA/DEC sync was lost in the 2026-09-26 power dip, and the DEC NOINIT
-   position is lost whenever a firmware build changes the memory layout.
+1. **Re-sync first.** The mount was powered off since, and the DEC NOINIT position is lost
+   whenever a firmware build changes the memory layout.
 2. **Clearance check before the first GoTo east of the meridian** (east limit −30° is already set):
    - Camera body ~22° below horizontal on the east side and ~17° on the west side.
    - Swing the lens through its whole DEC range.
@@ -42,12 +42,15 @@ What's done, what to test on the sky, what to build next. The details are in
 
 ## Small firmware items (no hardware needed)
 
-- Log the reset reason to NVS. On 2026-09-26 an OTA attempt power-cycled the mount, and a
-  power-on wipes the RAM log. This connects to the power-bank question (2026-09-23 offline event).
+- ~~Reset-reason log~~: done 2026-09-27 (`/api/boots`, `/sys`). The "OTA power dips" of 2026-09-26
+  were the user powering off. The 2026-09-23 offline event is still unexplained, and the log
+  will tell next time.
+- ~~Manual-move speeds~~: done 2026-09-27 (`:R0`–`:R9`, `test/hil/move_test.py`).
 - PEC phase verification: after a power-on the restored phase is trusted as it is. It should be
-  fitted against the first minutes of guiding, and PEC refused if it doesn't match.
-- Manual-move speeds (`:R0`–`:R9`): today manual moves always use the guide rate.
-- Optional: no register limit at all (shift the register after each GoTo, when the motor is stopped anyway).
+  fitted against the first minutes of guiding without PEC (the first target of the night; PEC
+  then plays from the next GoTo), and PEC refused if it doesn't match.
+- Optional, only if the clearance check allows tracking more than ~1.5 h past the meridian on the
+  flipped branch: no register limit at all (a software offset; shift the register after each GoTo).
 
 ## When the hardware arrives
 

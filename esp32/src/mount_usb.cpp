@@ -1,4 +1,5 @@
 #include "mount_usb.h"
+#include "bootlog.h"
 #include "netlog.h"
 #include "pl2303.h"
 #include <usb/usb_host.h>
@@ -209,6 +210,7 @@ static void openDevice(uint8_t addr) {
   inXfer->callback = inDoneCb;
   inXfer->timeout_ms = 0;
   connected = true;
+  bootlog::usbEvent(true);
   inFlight = true;
   if (usb_host_transfer_submit(inXfer) != ESP_OK) {
     logf("usb: cannot start bulk IN");
@@ -232,6 +234,7 @@ static void workerTask(void *) {
         closeDevice();
         xSemaphoreGive(cmdLock);
         logf("usb: mount disconnected");
+        bootlog::usbEvent(false);
       }
     }
     if (newDevAddr) {

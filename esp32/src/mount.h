@@ -29,7 +29,10 @@ double altitudeOf(double raDeg, double decDeg);  // now, at the site
 // :CM  Sync to the target, keeping the branch the mount is physically on. false: refused.
 bool syncTarget();
 
-void move(char dir);              // :Mn :Ms :Me :Mw  until stopped
+void move(char dir);              // :Mn :Ms :Me :Mw  until stopped, at the selected rate
+// OnStep :R0..:R9 -> 0.25x 0.5x 1x 2x 4x 8x 20x 48x half-max max (per axis)
+void setMoveRate(int index);
+int moveRate();
 void pulse(char dir, int ms);     // :Mg[nsew]ms
 void stop();                      // :Q   all axes
 void stopAxis(char dir);          // :Qn :Qs (DEC)  :Qe :Qw (RA)

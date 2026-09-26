@@ -19,6 +19,8 @@ static bool raValid = false, decValid = false;  // no :MS / :CM before a success
 // used: :MS takes the GoTo window, :CM keeps the branch the mount is physically on.
 static double reqRa, reqDec;
 static esp_timer_handle_t decGuideTimer;
+static int moveIdx = 5;  // 8x, OnStep's usual default
+static const double MOVE_X[] = {0.25, 0.5, 1, 2, 4, 8, 20, 48, -1, -2};  // -1 half max, -2 max
 
 // The branch must survive OTA/crash resets like the RA register and the DEC position
 // do, or the ESP would come back on the wrong side of the pole
@@ -177,9 +179,27 @@ static void slowMove(char d, int ms) {
   }
 }
 
+void setMoveRate(int index) {
+  if (index >= 0 && index <= 9) moveIdx = index;
+}
+
+int moveRate() { return moveIdx; }
+
 void move(char dir) {
   Guard g;
-  slowMove(dir, 0);
+  double x = MOVE_X[moveIdx];
+  if (dir == 'n' || dir == 's') {
+    double decX = x == -2 ? 256 : x == -1 ? 128 : x;  // DEC tops out at 256x (870 steps/s)
+    st.guideNorth = dir == 'n';
+    st.guideSouth = dir == 's';
+    bool north = (dir == 'n') != reverseDec();
+    esp_timer_stop(decGuideTimer);
+    dec::guide(north ? +1 : -1, dec::SIDEREAL_STEPS * decX);
+  } else if (dir == 'e' || dir == 'w') {
+    double raX = x == -2 ? ra::MOVE_MAX_X : x == -1 ? ra::MOVE_MAX_X / 2 : x;
+    bool swap = st.meridianFlipped && settings.flipRaGuiding;
+    ra::move(swap ? (dir == 'e' ? 'w' : 'e') : dir, raX);
+  }
 }
 
 void pulse(char dir, int ms) {

@@ -123,7 +123,7 @@ static String mountState(const ra::State &r, const mount::State &l) {
   if (l.guideSouth) dirs += "S/";
   if (r.guideEast) dirs += "E/";
   if (r.guideWest) dirs += "W/";
-  if (dirs.length()) return "GUIDING " + dirs.substring(0, dirs.length() - 1);
+  if (dirs.length()) return String(strcmp(r.phase, "moving") ? "GUIDING " : "MOVING ") + dirs.substring(0, dirs.length() - 1);
   return "TRACKING";
 }
 

@@ -24,7 +24,8 @@ void begin();
 void setTarget(long steps);  // :Sd
 void slew();                 // :MS  move to the target
 void stop();                 // :Q
-void guide(int dir);         // :Mn (+1) / :Ms (-1): move at guide speed until stop()
+// :Mn (+1) / :Ms (-1): move until stop(), at speed steps/s (0 = guide speed, capped at SLEW_SPEED)
+void guide(int dir, float speed = 0);
 // :Mgn / :Mgs pulse: exactly guide speed * ms steps (fractions carried over to the
 // next pulse), instead of a timed stop that would let queued steps overshoot
 void guidePulse(int dir, int ms);

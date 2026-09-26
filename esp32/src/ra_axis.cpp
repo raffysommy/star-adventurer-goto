@@ -25,7 +25,7 @@ static const double APPROACH_RATE = 8;       // x sidereal
 static const uint32_t SLEW_TIMEOUT_MS = 20 * 60 * 1000;
 
 
-enum CmdType { GOTO, GOTO_HA, STOP, SYNC, GUIDE, GUIDE_END, HOME, SET_REGISTER, EAST_LIMIT, TRACK_OFF, TRACK_ON, PEC_CMD, RATES };
+enum CmdType { GOTO, GOTO_HA, STOP, SYNC, GUIDE, GUIDE_END, HOME, SET_REGISTER, EAST_LIMIT, TRACK_OFF, TRACK_ON, PEC_CMD, RATES, MOVE };
 struct Cmd {
   CmdType type;
   double value;
@@ -34,7 +34,9 @@ struct Cmd {
   uint32_t seq;
 };
 
-enum Mode { DISCONNECTED, TRACK, SLEW, HALT };  // HALT: stopped (tracking off, or at TRACK_MAX)
+enum Mode { DISCONNECTED, TRACK, SLEW, HALT, MANUAL };  // HALT: stopped (tracking off, or at the limit)
+static uint32_t manualLastJMs;
+static bool manualRunning;
 
 static QueueHandle_t queue;
 static SemaphoreHandle_t stateLock;
@@ -55,7 +57,7 @@ static const uint32_t REFRACTION_EVERY_MS = 10000;
 // PEC
 static const int WORM_TEETH = 144;           // Star Adventurer RA worm wheel
 static const uint32_t PEC_GUIDE_QUIET_MS = 60000;
-static const uint32_t PHASE_SAVE_MS = 10000;
+static const uint32_t PHASE_SAVE_MS = 30000;  // +-30 s of phase at most; ~2900 NVS writes/day
 static pec::Worm worm;
 static double sidCps;                        // register counts per sidereal second
 static long wormOrigin;
@@ -471,7 +473,12 @@ static void handle(const Cmd &c) {
       startSlew(c.value, true);
       break;
     case STOP:  // stop_all()
-      if (mode == SLEW) {
+      if (mode == MANUAL) {
+        st.guideEast = st.guideWest = false;
+        trackT1 = baseT1;
+        startTracking();
+        logf("ra: manual move stopped, tracking");
+      } else if (mode == SLEW) {
         finishSlew("aborted", 0);
       } else if (st.guideEast || st.guideWest) {
         esp_timer_stop(guideTimer);
@@ -545,6 +552,37 @@ static void handle(const Cmd &c) {
     case PEC_CMD:
       pecHandle(c.dir);
       break;
+    case MOVE: {
+      if (mode == SLEW || mode == DISCONNECTED) break;
+      bool east = c.dir == 'e';
+      double r = fmin(fmax(c.value, 0.05), MOVE_MAX_X);
+      if (pecState == PEC_RECORDING) pecStop("recording ABORTED by a manual move");
+      esp_timer_stop(guideTimer);
+      st.guideEast = east;
+      st.guideWest = !east;
+      if (r < 0.95) {  // a speed change around tracking, like a long guide pulse
+        if (mode != TRACK) {
+          trackT1 = baseT1;
+          startTracking();
+        }
+        trackT1 = t1ForCps(baseCps() + (east ? -1 : 1) * r * sidCps);
+        sw::setT1(AXIS, trackT1);
+      } else {
+        double motor = (east ? r - 1 : r + 1) * sidCps;  // east from 1x: the motor reverses
+        manualRunning = motor > 0.05 * sidCps;
+        if (manualRunning) {
+          kick(east, max(SLEW_T1, t1ForCps(motor)), true);
+        } else {  // exactly 1x east: the sky moves, the motor stands
+          sw::stopSoft(AXIS);
+          sw::waitStopped(AXIS);
+        }
+        mode = MANUAL;
+        manualLastJMs = millis();
+      }
+      setPhase("moving");
+      logf("ra: manual move %s at %.2fx", east ? "east" : "west", r);
+      break;
+    }
     case RATES:
       if (c.value > 0) trackHz = c.value;
       lastRefrMs = 0;  // refraction on/off: recompute now
@@ -565,8 +603,10 @@ static void handle(const Cmd &c) {
       bool east = c.dir == 'e';
       st.guideEast = east;
       st.guideWest = !east;
-      lastPulseMs = millis();
-      guidedSinceGoto = true;
+      if (c.ms > 0) {  // pulses are guiding; continuous moves are not
+        lastPulseMs = millis();
+        guidedSinceGoto = true;
+      }
       // PEC recording: the correction the guider asked for, in register counts
       // (west = 1.5x = the mount had to go faster = +)
       if (pecState == PEC_RECORDING && c.ms > 0 && pecSeg >= 0)
@@ -615,6 +655,19 @@ static void task(void *) {
     st.axisHa = sw::countsToDeg(params, counts);
     st.axisRa = axisRaFromCounts(counts);
     xSemaphoreGive(stateLock);
+    if (mode == MANUAL) {
+      double reg = sw::countsToDeg(params, counts);
+      if (reg < 0.5 || reg > trackMax()) {
+        logf("ra: manual move STOPPED at the register limit (%.3f deg)", reg);
+        st.guideEast = st.guideWest = false;
+        trackT1 = baseT1;
+        startTracking();
+      } else if (manualRunning && millis() - manualLastJMs >= KEEPALIVE_MS) {
+        sw::start(AXIS);  // the firmware auto-stops a fast run after ~0.5-0.8 s
+        manualLastJMs = millis();
+        st.keepAlives++;
+      }
+    }
     if (mode == SLEW) slewStep(counts);
     else if (mode == TRACK) {
       trackStep(counts);
@@ -624,7 +677,7 @@ static void task(void *) {
         updateRefraction();
       }
     }
-    if (phaseKnown && millis() - lastPhaseSaveMs > PHASE_SAVE_MS) {
+    if (phaseKnown && pecRecorded && millis() - lastPhaseSaveMs > PHASE_SAVE_MS) {  // no table: phase unused
       lastPhaseSaveMs = millis();
       savePhase(counts);
     }
@@ -659,6 +712,8 @@ void setRegister(double ha) { post(SET_REGISTER, ha); }
 void gotoHa(double ha) { post(GOTO_HA, ha); }
 
 void setTracking(bool on) { post(on ? TRACK_ON : TRACK_OFF); }
+
+void move(char dir, double rate) { post(MOVE, rate, dir); }
 
 void pecCommand(char c) { post(PEC_CMD, 0, c); }
 

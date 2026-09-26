@@ -27,6 +27,11 @@ void gotoRa(double axisRa);  // :MS  (slew at max speed, then resume tracking)
 void stop();                 // :Q   (abort slew / end guiding / restart tracking)
 void sync(double axisRa);    // :CM  (position register := HA(axisRa))
 void guide(char dir, int ms);  // 'w' = 1.5x, 'e' = 0.5x sidereal; ms <= 0 until stop()
+// Manual move at rate x sidereal relative to the sky, until stop() (OnStep :Me/:Mw after :Rn).
+// Below 1x only the tracking speed changes; from 1x the motor runs west (forward) or east
+// (reversed) with the slew keep-alive. Stops at the register limits.
+void move(char dir, double rate);
+constexpr double MOVE_MAX_X = 67;  // max relative rate: the motor tops out at ~68x sidereal
 void setHome();              // register := offset() (mount at its home position, HA 0)
 // Move the register window (settings.raEastLimit). The register is shifted by the same
 // amount so the mount's physical position keeps its meaning.
@@ -52,7 +57,7 @@ double trackMax();
 // ---------------------------------------------------------------- PEC
 // OnStep-style periodic error correction (lib/core/pec.h). The worm phase comes from the
 // register (144-tooth worm); it follows every register rewrite and is saved to NVS every
-// 10 s, so it survives power cycles as long as the worm doesn't turn while unpowered.
+// 30 s while a table exists, so it survives power cycles as long as the worm doesn't turn while unpowered.
 // Playback never starts while guiding is active (a pulse within the last 60 s): PHD2's
 // Predictive PEC would otherwise see the mount change under it.
 enum PecState { PEC_IGNORE, PEC_READY_PLAY, PEC_PLAYING, PEC_READY_RECORD, PEC_RECORDING };

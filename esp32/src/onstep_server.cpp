@@ -96,7 +96,7 @@ static String statusLetters() {
   s += 'E';                                  // GEM
   s += mount::pierSide() == 'W' ? 'W' : 'T'; // pier side eas[T] / [W]est
   s += '2';                                  // pulse-guide rate index (0.5x)
-  s += '2';                                  // guide rate index
+  s += (char)('0' + mount::moveRate());     // manual-move rate index (:Rn)
   s += r.connected ? '0' : '7';              // error code: 7 = hardware fault (mount not connected)
   return s;
 }
@@ -384,8 +384,13 @@ String process(const String &cmd) {
         r = "";
       }
       break;
-    case 'R':
-      r = "";  // guide/slew rate selection: no reply; manual moves use the guide rates
+    case 'R':  // :R0#..:R9# manual-move rate; Meade :RG :RC :RM :RS
+      if (c[2] >= '0' && c[2] <= '9' && c[3] == '#') mount::setMoveRate(c[2] - '0');
+      else if (cmd == ":RG#") mount::setMoveRate(2);
+      else if (cmd == ":RC#") mount::setMoveRate(5);
+      else if (cmd == ":RM#") mount::setMoveRate(6);
+      else if (cmd == ":RS#") mount::setMoveRate(9);
+      r = "";
       break;
     case 'V': {
       ra::PecInfo pi = ra::pecInfo();
