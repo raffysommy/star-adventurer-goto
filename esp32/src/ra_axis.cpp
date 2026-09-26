@@ -47,6 +47,7 @@ static Mode mode = DISCONNECTED;
 static uint32_t siderealT1, trackT1;  // trackT1: the base rate, or the guide rate while guiding
 static uint32_t baseT1;               // tracking rate (x refraction), or the PEC rate while PEC plays
 static volatile double trackHz = SIDEREAL_HZ;
+
 static volatile double refrFactor = 1.0;
 static uint32_t lastRefrMs;
 static const uint32_t REFRACTION_EVERY_MS = 10000;
@@ -95,6 +96,7 @@ double trackMax() { return fmin(TRACK_MAX, offset() + 180.0 + settings.raWestMin
 
 // Tracking rate in register counts per second: sidereal x the chosen rate x refraction
 static double baseCps() { return sidCps * (trackHz / SIDEREAL_HZ) * refrFactor; }
+// The register runs at exactly timerHz / T1 (test/hil/rate_calibration.py: within 0.04%, T1 280-439)
 static uint32_t t1ForCps(double cps) { return (uint32_t)lround(params.timerHz / fmax(cps, 1.0)); }
 static void applyBase();
 
@@ -609,6 +611,7 @@ static void task(void *) {
     if (!sw::getPos(AXIS, counts)) continue;
     xSemaphoreTake(stateLock, portMAX_DELAY);
     st.counts = counts;
+    st.countsMs = millis();
     st.axisHa = sw::countsToDeg(params, counts);
     st.axisRa = axisRaFromCounts(counts);
     xSemaphoreGive(stateLock);

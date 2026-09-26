@@ -13,16 +13,17 @@ def check(name, cond, detail=''):
     ok &= bool(cond)
     print(f'{"PASS" if cond else "FAIL"}  {name}  {detail}')
 def rate(seconds=15):
-    a = status(); t0 = time.time(); time.sleep(seconds); b = status()
-    return (b['counts'] - a['counts']) / (time.time() - t0)
+    # timed by the ESP's own register-read timestamps: laptop-side timing over HTTP adds
+    # tenths of a percent of error (the "lunar 0.36% slow" of the first run)
+    a = status(); time.sleep(seconds); b = status()
+    return (b['counts'] - a['counts']) / ((b['counts_ms'] - a['counts_ms']) / 1000)
 
 # --- tracking rates (refraction off so the ratio is clean)
 q(':Tn#'); time.sleep(1)
 sid = rate()
 q(':TL#'); time.sleep(1)
 lun = rate()
-# the SA's count rate isn't exactly 1/T1: T1 447 (lunar) runs ~0.36% slower than predicted
-check('lunar rate', abs(lun / sid - 57.9 / 60.16427) < 0.006, f'ratio {lun / sid:.4f} (expect {57.9 / 60.16427:.4f}), :GT# {q(":GT#")}')
+check('lunar rate', abs(lun / sid - 57.9 / 60.16427) < 0.0015, f'ratio {lun / sid:.4f} (expect {57.9 / 60.16427:.4f}), :GT# {q(":GT#")}')
 q(':ST60.0#'); time.sleep(1)
 check('custom :ST60.0 (solar)', q(':GT#').startswith('60.000'), q(':GT#'))
 q(':TQ#'); time.sleep(1)

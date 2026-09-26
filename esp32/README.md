@@ -214,8 +214,10 @@ default 250 steps); lowering it softens the one-pulse overshoot after a reversal
 - **Tracking rates:**
   - sidereal, lunar, solar, King and custom (`:TQ :TL :TS :TK :ST`); not saved, sidereal at boot
   - The base is now true sidereal (`lx200.py`'s 0.004176 was a fixed "refracted" slow-down).
-  - Measured: the SA's count rate isn't exactly 1/T1. T1 447 (lunar) runs 0.36% slower than
-    predicted, which probably also explains PEC's 1.04 playback gain. To do: calibrate rate(T1) once.
+  - **Calibrated:** the SA's register runs at exactly timerHz / T1, within ±0.04% from T1 280 to
+    439 (`test/hil/rate_calibration.py`, data in `rate_calibration.csv`). The earlier "lunar
+    0.36% slow" and PEC's 1.04 gain were laptop-side HTTP timing. Rate tests now use the ESP's
+    own register-read timestamp (`counts_ms` in `/api/status`).
 - **Refraction** (`:Tr`/`:Tn`, default on, RA only; `:T2` dual axis is not supported):
   - Every 10 s the rate is scaled by d(apparent HA)/d(true HA) at the current pointing
     (Saemundsson's formula).
@@ -245,6 +247,7 @@ default 250 steps); lowering it softens the one-pulse overshoot after a reversal
     2026-09-26: table correlation 0.978, playback correlation 0.999, gain 1.04, 5.4 counts rms residual.
   - `features_test.py`: tracking rates, refraction, guide rate, backlash, DEC axis limits and
     the strict PEC rule (~3 min, small moves)
+  - `rate_calibration.py`: RA register rate vs raw T1, timed on the ESP (~2.5 min per point)
 
   ```sh
   cd test/hil && STARMOUNT_HOST=starmount.local STARMOUNT_IFACE=wlo1 python3 guide_soak.py

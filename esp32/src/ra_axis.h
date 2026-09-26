@@ -79,6 +79,7 @@ struct State {
   bool guideEast, guideWest;
   const char *phase;  // disconnected / tracking / guiding / slewing / approach / limit / stopped
   long counts;        // raw position register
+  uint32_t countsMs;  // millis() when counts was read (rate measurements)
   double axisHa;      // register in degrees (= hour angle + offset())
   double axisRa;      // ra_current
   double slewTarget;

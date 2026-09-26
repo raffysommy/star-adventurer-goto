@@ -38,12 +38,13 @@ struct Recorder {
 // table when there is one (merge).
 void finish(const Recorder &r, float *table, int n, int smoothing, bool merge);
 
-// Playback: tracking rate for a segment, as a T1 value (timerHz / counts per second).
-// T1 is coarse (~0.23% per unit at sidereal), so the rate error of each segment is
-// carried into the next one: over a worm turn the delivered correction is exact.
+// Playback: tracking rate for a segment, as a T1 value (timerHz / counts per second: the
+// mount's register runs at exactly that, calibrated 2026-09-26 within 0.04%). T1 is coarse
+// (~0.23% per unit at sidereal), so the rate error of each segment is carried into the
+// next one: over a worm turn the delivered correction is exact.
 struct Player {
   double carry = 0;  // counts owed from earlier segments
-  uint32_t t1(double siderealCountsPerSec, float correctionCounts, double segSeconds, long timerHz);
+  uint32_t t1(double baseCountsPerSec, float correctionCounts, double segSeconds, long timerHz);
   void reset() { carry = 0; }
 };
 

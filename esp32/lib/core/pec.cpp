@@ -51,10 +51,10 @@ void finish(const Recorder &r, float *table, int n, int smoothing, bool merge) {
   }
 }
 
-uint32_t Player::t1(double siderealCountsPerSec, float correctionCounts, double segSeconds, long timerHz) {
-  double want = siderealCountsPerSec + (correctionCounts + carry) / segSeconds;
-  if (want < siderealCountsPerSec * 0.5) want = siderealCountsPerSec * 0.5;  // never more than a guide pulse
-  if (want > siderealCountsPerSec * 1.5) want = siderealCountsPerSec * 1.5;
+uint32_t Player::t1(double baseCountsPerSec, float correctionCounts, double segSeconds, long timerHz) {
+  double want = baseCountsPerSec + (correctionCounts + carry) / segSeconds;
+  if (want < baseCountsPerSec * 0.5) want = baseCountsPerSec * 0.5;  // never more than a guide pulse
+  if (want > baseCountsPerSec * 1.5) want = baseCountsPerSec * 1.5;
   uint32_t t1 = (uint32_t)lround(timerHz / want);
   double got = (double)timerHz / t1;
   carry = (want - got) * segSeconds;

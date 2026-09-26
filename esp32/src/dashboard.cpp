@@ -139,14 +139,14 @@ static void sendStatus() {
   snprintf(buf, sizeof(buf),
            "{\"ra\":\"%s\",\"dec\":\"%s\",\"state\":\"%s\",\"phase\":\"%s\",\"meridian_flipped\":%s,"
            "\"dec_axis_reversed\":%s,\"flip_ra_guiding\":%s,\"effective_dec_flip\":%s,"
-           "\"axis_ra\":%.6f,\"axis_ha\":%.6f,\"counts\":%ld,\"ra_target\":%.6f,\"lst\":%.6f,\"lst_hms\":\"%s\","
+           "\"axis_ra\":%.6f,\"axis_ha\":%.6f,\"counts\":%ld,\"counts_ms\":%lu,\"ra_target\":%.6f,\"lst\":%.6f,\"lst_hms\":\"%s\","
            "\"clock\":%.3f,\"clock_valid\":%s,\"clock_source\":\"%s\",\"utc_offset\":%.2f,\"lat\":%.4f,\"lon\":%.4f,"
            "\"stalls\":%lu,\"kicks\":%lu,\"keep_alives\":%lu,\"lx200_clients\":%d,"
            "\"dec_steps\":%ld,\"dec_target\":%ld,\"dec_motor\":%ld,\"dec_backlash\":%ld,\"ra_east_limit\":%.1f,\"ra_west_minutes\":%ld,\"track_max\":%.2f,\"horizon_limit\":%ld,\"overhead_limit\":%ld,\"gps_sets_site\":%s,\"refraction\":%s,\"refraction_factor\":%.6f,\"track_hz\":%.5f,\"pec_strict\":%s,\"guide_rate\":%.2f,\"dec_axis_min\":%.1f,\"dec_axis_max\":%.1f,\"pec\":{\"state\":%d,\"recorded\":%s,\"index\":%s,\"segment\":%d,\"segments\":%d},\"gps\":{\"enabled\":%s,\"receiving\":%s,\"time\":%s,\"pos\":%s,\"sats\":%d,\"lat\":%.6f,\"lon\":%.6f,\"alt\":%.1f,\"hdop\":%.1f,\"sentences\":%lu,\"bad\":%lu,\"time_sync_age\":%ld},\"dec_moving\":%s,\"pier_east\":%s}",
            mount::reportedRa().c_str(), mount::reportedDec().c_str(), mountState(r, l).c_str(), r.phase,
            l.meridianFlipped ? "true" : "false", settings.decAxisReversed ? "true" : "false",
            settings.flipRaGuiding ? "true" : "false", (l.meridianFlipped ^ settings.decAxisReversed) ? "true" : "false",
-           r.axisRa, r.axisHa, r.counts, l.raTarget, lst, lstHms, clockNow(), clockValid() ? "true" : "false",
+           r.axisRa, r.axisHa, r.counts, (unsigned long)r.countsMs, l.raTarget, lst, lstHms, clockNow(), clockValid() ? "true" : "false",
            clockSource(), settings.utcOffset, settings.lat, settings.lonEast, (unsigned long)r.stalls,
            (unsigned long)r.kicks, (unsigned long)r.keepAlives, onstep::clients(), dec::position(), dec::target(),
            dec::motorPosition(), (long)settings.decBacklash, settings.raEastLimit, (long)settings.raWestMinutes, ra::trackMax(),
