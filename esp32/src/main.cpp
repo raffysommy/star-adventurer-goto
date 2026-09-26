@@ -18,6 +18,7 @@
 #include "onstep_server.h"
 #include "mount_usb.h"
 #include "netlog.h"
+#include "persist.h"
 #include "ra_axis.h"
 #include "settings.h"
 #include "synscan_udp.h"
@@ -274,6 +275,7 @@ void setup() {
 
   settingsLoad();
   bootlog::begin();
+  persist::begin();
   wifiBegin();
   clockBegin();
   otaBegin();

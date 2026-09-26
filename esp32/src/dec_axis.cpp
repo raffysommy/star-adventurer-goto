@@ -4,6 +4,7 @@
 #include <esp_attr.h>
 
 #include "netlog.h"
+#include "persist.h"
 
 namespace dec {
 
@@ -12,8 +13,6 @@ static const int DIR_PIN = 5;
 static const int ENABLE_PIN = 38;
 static const uint32_t ACCEL = 3000;  // steps/s^2: ~0.3 s to slew speed, negligible at guide speed
 static const long HOME_STEPS = 146400;  // lx200.py syncs DEC to this at startup (0 deg)
-static const uint32_t POS_MAGIC = 0x44454332;
-static const uint32_t POS_MAGIC_V1 = 0x44454331;  // before the backlash model: motor only
 
 static FastAccelStepperEngine engine;
 static FastAccelStepper *stepper;
@@ -37,9 +36,6 @@ static volatile bool slewPhase2 = false;  // after an overshoot, finish forward 
 static volatile int pendingRun = 0;       // guide(): start running once the play is taken up
 static volatile float runSpeed;
 
-// The stepper is open loop: keep its position across soft resets and OTA updates
-__NOINIT_ATTR static int32_t savedPos, savedGear;
-__NOINIT_ATTR static uint32_t savedMagic;
 
 static uint32_t milliHz(float stepsPerSec) { return (uint32_t)(stepsPerSec * 1000.0f); }
 
@@ -140,7 +136,7 @@ void guide(int dir, float speed) {
   pendingRun = 0;
   stepper->setSpeedInMilliHz(milliHz(runSpeed));
   if (stepper->isRunning()) stepper->applySpeedAcceleration();
-  dir > 0 ? stepper->runForward() : stepper->runBackward();
+  stepper->moveTo(motorFor(dir > 0 ? limMax : limMin, dir));  // ends exactly at the axis limit
 }
 
 void guidePulse(int dir, int ms) {
@@ -222,13 +218,13 @@ static void task(void *) {
       int dir = pendingRun;
       pendingRun = 0;
       stepper->setSpeedInMilliHz(milliHz(runSpeed));
-      dir > 0 ? stepper->runForward() : stepper->runBackward();
+      stepper->moveTo(motorFor(dir > 0 ? limMax : limMin, dir));  // ends exactly at the axis limit
     } else if (guideActive && !stepper->isRunning()) {
       guideActive = pulseActive = false;  // pulse done
     }
-    savedPos = motorPosition();
-    savedGear = position();
-    savedMagic = POS_MAGIC;
+    // the stepper is open loop: keep its position across soft resets and OTA updates
+    persist::s.decMotor = motorPosition();
+    persist::s.decGear = position();
     vTaskDelay(pdMS_TO_TICKS(20));
   }
 }
@@ -244,11 +240,9 @@ void begin() {
   stepper->setEnablePin(ENABLE_PIN, true);  // EasyDriver ENABLE is active low
   stepper->setAutoEnable(true);             // driver off while idle, like the old controller
   stepper->setAcceleration(ACCEL);
-  bool warm = esp_reset_reason() != ESP_RST_POWERON;
-  bool kept = warm && (savedMagic == POS_MAGIC || savedMagic == POS_MAGIC_V1);
-  if (kept && savedMagic == POS_MAGIC_V1) savedGear = savedPos;
-  stepper->setCurrentPosition(kept ? savedPos : HOME_STEPS);
-  gear = kept ? savedGear : HOME_STEPS;
+  bool kept = persist::kept();  // otherwise persist holds the home position
+  stepper->setCurrentPosition(persist::s.decMotor);
+  gear = persist::s.decGear;
   targetPos = position();
   logf("dec: stepper on STEP %d DIR %d EN %d, position %ld (motor %ld)%s", STEP_PIN, DIR_PIN, ENABLE_PIN,
        position(), motorPosition(), kept ? " (kept across reset)" : " (home, 0 deg)");

@@ -48,23 +48,20 @@ RaTarget selectTarget(double requestedRa, double lst, double offset) {
   return t;
 }
 
-RaTarget selectSyncTarget(double requestedRa, double lst, double offset, double currentRegister, double trackMax,
-                          bool &ok) {
+// Axis angle of an axis RA, taken nearest a reference angle (the angle is not bounded to
+// one turn any more: the register is re-centred, only physical limits apply)
+static double angleNear(double axisRa, double lst, double offset, double ref) {
+  double a = hourAngle(axisRa, lst, offset);
+  return a + 360.0 * lround((ref - a) / 360.0);
+}
+
+RaTarget selectSyncTarget(double requestedRa, double lst, double offset, double currentAngle) {
   RaTarget c[2] = {{requestedRa, false}, {wrap360(requestedRa + 180), true}};
-  ok = false;
-  RaTarget best = c[0];
-  double bestDist = 1e9;
-  for (const RaTarget &t : c) {
-    double reg = hourAngle(t.ra, lst, offset);
-    if (reg < MARGIN || reg > trackMax) continue;
-    double d = fabs(reg - currentRegister);
-    if (d < bestDist) {
-      bestDist = d;
-      best = t;
-      ok = true;
-    }
-  }
-  return best;
+  double d0 = fabs(angleNear(c[0].ra, lst, offset, currentAngle) - currentAngle);
+  double d1 = fabs(angleNear(c[1].ra, lst, offset, currentAngle) - currentAngle);
+  RaTarget best = d0 <= d1 ? c[0] : c[1];
+  if (fmin(d0, d1) <= SYNC_NEAR) return best;
+  return selectTarget(requestedRa, lst, offset);  // position unknown: the GoTo window decides
 }
 
 double reportedRa(double axisRa, bool flipped, double lst, double offset) {

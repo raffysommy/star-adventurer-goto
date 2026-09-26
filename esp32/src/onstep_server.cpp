@@ -200,7 +200,7 @@ static String set(const String &cmd, const char *c) {
         return "1";
       case 'w':
         if (n < 90 || n > 270) return "0";
-        settings.raWestMinutes = lround((n - 180) * 4);
+        settings.raWestMinutes = constrain(lround((n - 180) * 4), 0L, 240L);
         break;
       case 'C':
         if (n < -180 || n >= settings.decAxisMax) return "0";
@@ -236,7 +236,7 @@ static String set(const String &cmd, const char *c) {
     if (n < 0 || n > 360) return "0";
     if (c[4] == '9') ra::setEastLimit(-n / 4.0);  // shifts the register window (saved)
     else {
-      settings.raWestMinutes = n;
+      settings.raWestMinutes = min(n, 240L);  // physical: camera ~40 deg below horizontal at 4 h
       settingsSave();
     }
     return "1";

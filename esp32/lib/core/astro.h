@@ -39,12 +39,13 @@ struct RaTarget {
 };
 RaTarget selectTarget(double requestedRa, double lst, double offset);
 
-// Sync target: a sync doesn't move the mount, so it must keep the branch the mount
-// is physically on. Of the two candidates, those with a register in [MARGIN, trackMax]
-// are valid; the one nearest the current register wins (a real sync correction is
-// small, the other branch is ~180 deg away). ok = false if neither is valid.
-RaTarget selectSyncTarget(double requestedRa, double lst, double offset, double currentRegister, double trackMax,
-                          bool &ok);
+// Sync target: a sync doesn't move the mount, so it must keep the branch the mount is
+// physically on: the candidate nearest the current axis angle wins if it is within
+// SYNC_NEAR degrees (a real sync correction is small, the other branch is ~180 away),
+// even past a limit (the mount is where it is). Only when both are far (position
+// unknown, e.g. the assumed home after a power-on) does the GoTo window decide.
+constexpr double SYNC_NEAR = 20.0;
+RaTarget selectSyncTarget(double requestedRa, double lst, double offset, double currentAngle);
 
 // RA reported to the client (get_ra / dashboard_ra_string)
 double reportedRa(double axisRa, bool flipped, double lst, double offset);

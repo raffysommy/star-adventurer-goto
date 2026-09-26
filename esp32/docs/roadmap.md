@@ -49,8 +49,8 @@ What's done, what to test on the sky, what to build next. The details are in
 - PEC phase verification: after a power-on the restored phase is trusted as it is. It should be
   fitted against the first minutes of guiding without PEC (the first target of the night; PEC
   then plays from the next GoTo), and PEC refused if it doesn't match.
-- Optional, only if the clearance check allows tracking more than ~1.5 h past the meridian on the
-  flipped branch: no register limit at all (a software offset; shift the register after each GoTo).
+- ~~No register limit~~: done 2026-09-27 (axis angle vs register, re-centred only at stops,
+  never while tracking; verified register writes; persistent-state struct).
 
 ## When the hardware arrives
 

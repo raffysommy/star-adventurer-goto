@@ -7,6 +7,7 @@
 
 #include "dec_axis.h"
 #include "netlog.h"
+#include "persist.h"
 #include "ra_axis.h"
 #include "settings.h"
 
@@ -22,19 +23,16 @@ static esp_timer_handle_t decGuideTimer;
 static int moveIdx = 5;  // 8x, OnStep's usual default
 static const double MOVE_X[] = {0.25, 0.5, 1, 2, 4, 8, 20, 48, -1, -2};  // -1 half max, -2 max
 
-// The branch must survive OTA/crash resets like the RA register and the DEC position
-// do, or the ESP would come back on the wrong side of the pole
-__NOINIT_ATTR static uint32_t savedFlipped;
-static const uint32_t FLIP_MAGIC = 0x464C5000;  // | flipped bit
-
 struct Guard {
   Guard() { xSemaphoreTake(lock, portMAX_DELAY); }
   ~Guard() { xSemaphoreGive(lock); }
 };
 
+// The branch must survive OTA/crash resets like the RA register and the DEC position
+// do, or the ESP would come back on the wrong side of the pole
 static void setFlipped(bool f) {
   st.meridianFlipped = f;
-  savedFlipped = FLIP_MAGIC | (f ? 1 : 0);
+  persist::s.flipped = f;
 }
 
 static bool reverseDec() { return st.meridianFlipped ^ settings.decAxisReversed; }
@@ -53,9 +51,7 @@ static void decGuideEnd(void *) { st.guideNorth = st.guideSouth = false; }
 
 void begin() {
   lock = xSemaphoreCreateMutex();
-  bool kept = esp_reset_reason() != ESP_RST_POWERON && (savedFlipped & ~1u) == FLIP_MAGIC;
-  setFlipped(kept && (savedFlipped & 1));
-  if (kept && st.meridianFlipped) logf("mount: meridian flipped (kept across reset)");
+  setFlipped(persist::s.flipped);  // false after a power-on
   esp_timer_create_args_t args = {};
   args.callback = decGuideEnd;
   args.name = "dec_guide";
@@ -141,12 +137,13 @@ bool syncTarget() {
   bool ok = false;
   if (raValid) {
     ra::State rs = ra::state();
-    astro::RaTarget t = astro::selectSyncTarget(reqRa, ra::lst(), ra::offset(), rs.axisHa, ra::TRACK_MAX, ok);
+    astro::RaTarget t = astro::selectSyncTarget(reqRa, ra::lst(), ra::offset(), rs.axisHa);
+    ok = true;
     if (ok) {
       if (t.flipped != st.meridianFlipped) logf("mount: sync on the %s branch", t.flipped ? "flipped" : "normal");
       setFlipped(t.flipped);
       st.raTarget = t.ra;
-      ra::sync(t.ra);
+      ra::sync(t.ra);  // sets the position trusted once the register write is confirmed
     } else {
       logf("mount: sync RA %.4f REFUSED, outside the register range on both branches", reqRa);
     }
@@ -269,5 +266,7 @@ bool busy() {
 }
 
 bool tracking() { return ra::state().tracking; }
+
+bool positionTrusted() { return persist::s.trusted; }
 
 }  // namespace mount

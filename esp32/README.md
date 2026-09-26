@@ -252,6 +252,31 @@ default 250 steps); lowering it softens the one-pulse overshoot after a reversal
   - Flash wear: one record per boot or event, plus 288 small writes a day.
 - The PEC phase is now saved every 30 s, and only while a table exists.
 
+## RA without a register limit, persistent state (2026-09-27)
+
+- **Axis angle vs register.** The model (GoTo window, branch choice, sync, limits) works in
+  the axis angle (= hour angle − east limit + 2°). The SA's register is bookkeeping:
+  - register = axis angle + a persisted shift
+  - It is re-centred to 8° whenever the motor is stopped anyway: sync, home, the start and end
+    of a GoTo (a slew longer than the band re-centres mid-way).
+  - **Never while tracking:** after ~15 h without a GoTo or sync, tracking stops at the band
+    end instead of disturbing guiding.
+  - The only RA limits are physical: the east limit, and the west tracking stop
+    (`raWestMinutes`, default 120 = axis angle 242° with −30°; max 240 min).
+- **Register writes are verified**: wait for the stop, write, read back, retry up to 3 times
+  with a hard stop. The SA rejects `:E` while still stopping. It was seen twice in 20 writes
+  after fast moves, and before this fix a sync could silently not apply. A write that still
+  fails marks the position untrusted.
+- **Sync keeps the branch nearest the current axis angle** (within 20°), even past a limit.
+  Before, a sync exactly at the tracking stop picked the other branch.
+- **Persistent state** (`persist.h`): one versioned struct in RTC memory holds the DEC
+  position, the flip flag, the RA shift and "position trusted". It survives OTAs of *new*
+  firmware (separate no-init variables moved whenever unrelated code changed), with no flash
+  wear. It's lost on power-off, which resets the mount too.
+- **Position trusted** (dashboard "NOT SYNCED"): false after a power-on (assumed home) or a
+  failed register write, true after a confirmed sync.
+- DEC continuous moves are bounded moves to the axis limit (exact stop even at 256×).
+
 ## Tests
 
 - `pio test -e native`: astro math, DEC steps, parsing. Regenerate golden values with

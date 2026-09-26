@@ -46,12 +46,18 @@ void ratesChanged();         // settings.refraction / guideRate changed
 void setRegister(double ha); // debug: redefine the current position (no motion)
 void gotoHa(double ha);      // debug: slew to a fixed register angle
 
-// Register limits (degrees): below 0 the firmware stalls, above ~241.7 the 24-bit
-// register overflows. GoTo targets come from the window [MARGIN, WINDOW_MAX] (both
-// branches); tracking and sync may go on up to TRACK_MAX, where tracking stops.
-constexpr double HA_MIN = astro::MARGIN, HA_MAX = astro::WINDOW_MAX + 1, TRACK_MAX = 235.0;
-// Where tracking stops: settings.raWestMinutes past the meridian on the flipped branch,
-// never beyond TRACK_MAX (register overflow)
+// Axis angle vs register. Everything here reasons in the "axis angle" (degrees, = hour
+// angle - east limit + MARGIN, as lx200.py's register): GoTo window [MARGIN, WINDOW_MAX]
+// on both branches, sync, limits. The mount's own register is only bookkeeping:
+//   register = axis angle + persist::s.raShiftDeg
+// kept inside [REG_MIN, REG_MAX] (below 0 the SA stalls, above 241.7 its 24-bit value
+// overflows) by re-centring it at REG_HOME whenever the motor is stopped anyway: sync,
+// home, GoTo start/end (a slew longer than the band re-centres mid-way). Never while
+// tracking: after ~15 h without a GoTo/sync tracking stops at the band end instead.
+// So the RA limits are physical: the east limit and trackMax().
+constexpr double HA_MIN = astro::MARGIN, HA_MAX = astro::WINDOW_MAX + 1;
+constexpr double REG_MIN = 3.0, REG_HOME = 8.0, REG_MAX = 238.0;
+// Where tracking stops: settings.raWestMinutes past the meridian on the flipped branch
 double trackMax();
 
 // ---------------------------------------------------------------- PEC
@@ -84,8 +90,9 @@ struct State {
   bool guideEast, guideWest;
   const char *phase;  // disconnected / tracking / guiding / slewing / approach / limit / stopped
   long counts;        // raw position register
+  double registerDeg; // the register in degrees (axisHa + shift)
   uint32_t countsMs;  // millis() when counts was read (rate measurements)
-  double axisHa;      // register in degrees (= hour angle + offset())
+  double axisHa;      // axis angle in degrees (= hour angle + offset())
   double axisRa;      // ra_current
   double slewTarget;
   uint32_t stalls, kicks, keepAlives;

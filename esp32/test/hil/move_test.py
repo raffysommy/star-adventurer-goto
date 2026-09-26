@@ -33,7 +33,8 @@ d1 = status()['dec_steps']
 check('DEC :R7 north 2 s', 150 < d1 - d0 < 360, f'{d1 - d0} steps (48x = 326 in 2 s, less any backlash take-up)')
 lx.cmd(':Ms#'); time.sleep(2); lx.cmd(':Qs#'); time.sleep(1)
 d2 = status()['dec_steps']
-check('DEC back south', abs(d2 - d0) < 60, f'{d2 - d0} steps from the start (backlash take-up at slew speed)')
+# start/stop are timed over Wi-Fi: +-0.2 s at ~160 steps/s on each end
+check('DEC back south', abs(d2 - d0) < 130, f'{d2 - d0} steps from the start (backlash take-up at slew speed)')
 s = status()
 check('tracking again', s['state'] == 'TRACKING', f'{s["state"]}, :GU# {lx.cmd(":GU#")}')
 print('PASS' if ok else 'FAIL')

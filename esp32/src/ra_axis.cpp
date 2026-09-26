@@ -9,6 +9,7 @@
 #include "mount.h"
 #include "mount_usb.h"
 #include "netlog.h"
+#include "persist.h"
 #include "settings.h"
 #include "skywatcher.h"
 
@@ -88,11 +89,14 @@ double offset() { return astro::MARGIN - settings.raEastLimit; }
 
 static double hourAngle(double raDeg) { return astro::hourAngle(raDeg, lst(), offset()); }
 
-static double axisRaFromCounts(long counts) {
-  return astro::rightAscension(sw::countsToDeg(params, counts), lst(), offset());
-}
+// axis angle <-> register (see ra_axis.h)
+static double &shift = persist::s.raShiftDeg;
+static double angleOf(long counts) { return sw::countsToDeg(params, counts) - shift; }
+static double registerOf(long counts) { return sw::countsToDeg(params, counts); }
 
-double trackMax() { return fmin(TRACK_MAX, offset() + 180.0 + settings.raWestMinutes / 4.0); }
+static double axisRaFromCounts(long counts) { return astro::rightAscension(angleOf(counts), lst(), offset()); }
+
+double trackMax() { return offset() + 180.0 + settings.raWestMinutes / 4.0; }
 
 // ---------------------------------------------------------------- rates
 
@@ -167,14 +171,47 @@ static void loadPec(bool fresh, long counts) {
 }
 
 // Every register rewrite moves the worm origin with it: the worm itself didn't turn
+// The mount refuses :E while the motor still runs, so wait, write, read back to verify,
+// and retry with a hard stop. A register that can't be written leaves the position unknown.
 static bool setRegister(long newCounts) {
   long old;
   bool haveOld = sw::getPos(AXIS, old);
-  if (!sw::setPos(AXIS, newCounts)) return false;
+  bool ok = false;
+  for (int i = 0; i < 3 && !ok; i++) {
+    if (i) sw::stopHard(AXIS);
+    sw::waitStopped(AXIS);
+    long back;
+    ok = sw::setPos(AXIS, newCounts) && sw::getPos(AXIS, back) && labs(back - newCounts) < 50;
+    if (!ok) logf("ra: register write %ld not accepted (attempt %d)", newCounts, i + 1);
+  }
+  if (!ok) {
+    persist::s.trusted = false;
+    logf("ra: register write FAILED: position untrusted, sync again");
+    return false;
+  }
   if (haveOld && phaseKnown) {
     wormOrigin += newCounts - old;
     savePhase(newCounts);
   }
+  return true;
+}
+
+// Motor stopped: put the current axis angle at register regDeg (the worm origin follows)
+static uint32_t recentres;
+static void recentre(double regDeg, const char *why) {
+  long counts;
+  if (!sw::getPos(AXIS, counts)) return;
+  double a = angleOf(counts);
+  if (!setRegister(sw::degToCounts(params, regDeg))) return;
+  shift = regDeg - a;
+  recentres++;
+  logf("ra: register re-centred (%s): angle %.3f at register %.3f, shift %.3f", why, a, regDeg, shift);
+}
+
+// Motor stopped: put the axis angle a at register regDeg
+static bool placeAngle(double a, double regDeg) {
+  if (!setRegister(sw::degToCounts(params, regDeg))) return false;
+  shift = regDeg - a;
   return true;
 }
 
@@ -325,12 +362,13 @@ static void onConnect() {
   bool fresh = labs(counts) < sw::degToCounts(params, 1.0);
   loadPec(fresh, counts);
   if (fresh) {
-    setRegister(sw::degToCounts(params, offset()));
+    placeAngle(offset(), REG_HOME);  // home: HA 0
+    persist::s.trusted = false;
     logf("ra: fresh mount, register set to home (HA 0, register %.1f deg)", offset());
   } else {
-    logf("ra: keeping position register (%.3f deg)", sw::countsToDeg(params, counts));
+    logf("ra: keeping position register (%.3f deg, axis angle %.3f)", registerOf(counts), angleOf(counts));
   }
-  logf("ra: connected, CPR %ld, timer %ld Hz, sidereal T1 %lu", params.cpr, params.timerHz,
+  logf("ra: connected to the mount, CPR %ld, timer %ld Hz, sidereal T1 %lu", params.cpr, params.timerHz,
        (unsigned long)siderealT1);
   xSemaphoreTake(stateLock, portMAX_DELAY);
   st.connected = true;
@@ -344,13 +382,31 @@ static double targetHa() { return slew.targetIsHa ? slew.target : hourAngle(slew
 
 // Distance to go, from the raw register (lx200.py wraps HA(current) through RA,
 // which misbehaves once the register leaves its wrap window)
-static double slewDistance(long counts) { return sw::countsToDeg(params, counts) - targetHa(); }
+static double slewDistance(long counts) { return angleOf(counts) - targetHa(); }
 
 static void finishSlew(const char *why, double d) {
   sw::stopHard(AXIS);
   sw::waitStopped(AXIS);
   logf("ra: slew %s after %.1f s, residual %.4f deg", why, (millis() - slew.startMs) / 1000.0, d);
+  long counts;
+  // stopped anyway: give tracking the whole register band
+  if (sw::getPos(AXIS, counts) && fabs(registerOf(counts) - REG_HOME) > 30) recentre(REG_HOME, "end of slew");
   startTracking();
+}
+
+// The slew must not leave the register band: if it would, stop and re-centre so that it
+// fits (or, for a slew longer than the band, so that it has the most room ahead)
+static void fitSlew(long counts, bool stopFirst) {
+  double a = angleOf(counts), t = targetHa();
+  double lo = fmin(a, t), hi = fmax(a, t);
+  double rLo = lo + shift, rHi = hi + shift;
+  if (rLo >= REG_MIN && rHi <= REG_MAX) return;
+  if (stopFirst) {
+    sw::stopHard(AXIS);
+    sw::waitStopped(AXIS);
+  }
+  if (hi - lo <= REG_MAX - REG_HOME) recentre(REG_HOME + (a - lo), "slew fits");
+  else recentre(t < a ? REG_MAX - 1 : REG_HOME, "long slew");
 }
 
 static void startSlew(double target, bool isHa) {
@@ -368,6 +424,8 @@ static void startSlew(double target, bool isHa) {
     logf("ra: goto REFUSED, target HA %.3f outside [%.0f, %.0f]", ha, HA_MIN, HA_MAX);
     return;
   }
+  fitSlew(counts, true);
+  sw::getPos(AXIS, counts);
   // goto_ra(): CW0 = HA(current) - HA(target); CW when <= 0
   slew.d0 = slewDistance(counts);
   if (fabs(slew.d0) < 1e-4) return;
@@ -378,7 +436,7 @@ static void startSlew(double target, bool isHa) {
   xSemaphoreTake(stateLock, portMAX_DELAY);
   st.slewTarget = target;
   xSemaphoreGive(stateLock);
-  logf("ra: slew %s %.3f deg to %s %.4f (HA %.4f)", slew.ccw ? "CCW" : "CW", fabs(slew.d0), isHa ? "register" : "RA",
+  logf("ra: slew %s %.3f deg to %s %.4f (axis angle %.4f)", slew.ccw ? "CCW" : "CW", fabs(slew.d0), isHa ? "axis angle" : "RA",
        target, ha);
   bool fast = fabs(slew.d0) >= APPROACH_DEG;
   slew.approach = !fast;
@@ -388,6 +446,14 @@ static void startSlew(double target, bool isHa) {
 }
 
 static void slewStep(long counts) {
+  double r = registerOf(counts);
+  if ((slew.ccw && r < REG_MIN + 1) || (!slew.ccw && r > REG_MAX)) {  // a slew longer than the band
+    fitSlew(counts, true);
+    kick(slew.ccw, slew.approach ? sw::t1ForRate(params, APPROACH_RATE * SIDEREAL) : SLEW_T1, true);
+    slew.lastJMs = millis();
+    resetStallCheck();
+    return;
+  }
   double d = slewDistance(counts);
   uint32_t now = millis();
   if (slew.d0 * d <= 0) return finishSlew("done", d);  // sign change: arrived / overshot
@@ -426,16 +492,22 @@ static void slewStep(long counts) {
 // Only if the position still doesn't advance is the full stop/G/I/J sequence used.
 static void trackStep(long counts) {
   uint32_t now = millis();
-  // Past TRACK_MAX the register would soon overflow: stop instead of tracking on.
+  // Past the RA limit (or the register band end): stop instead of tracking on.
   // A GoTo (into the window, possibly flipping) or a sync takes it from here.
-  if (sw::countsToDeg(params, counts) > trackMax()) {
+  // Never re-centre while tracking (it would disturb guiding and the exposure): ~15 h
+  // after the last GoTo/sync the register band ends, and tracking stops like at a limit.
+  // The next GoTo or sync re-centres it.
+  bool bandEnd = registerOf(counts) > REG_MAX;
+  if (bandEnd || angleOf(counts) > trackMax()) {
     sw::stopSoft(AXIS);
     sw::waitStopped(AXIS);
     st.guideEast = st.guideWest = false;
     trackT1 = baseT1;
     mode = HALT;
     setPhase("limit");
-    logf("ra: tracking STOPPED at the RA limit (register %.3f > %.1f deg)", sw::countsToDeg(params, counts), trackMax());
+    logf("ra: tracking STOPPED at the %s (axis angle %.3f, limit %.1f; register %.3f)",
+         bandEnd ? "register band end (GoTo or sync to continue)" : "RA limit", angleOf(counts), trackMax(),
+         registerOf(counts));
     return;
   }
   if (now - lastRunCheckMs >= RUN_CHECK_MS) {
@@ -507,15 +579,22 @@ static void handle(const Cmd &c) {
     case SYNC: {
       if (!clockValid()) logf("ra: WARNING clock not set, sync will be wrong");
       double ha = hourAngle(c.value);
-      if (ha < HA_MIN || ha > TRACK_MAX) {
-        logf("ra: sync REFUSED, HA %.3f outside [%.0f, %.0f]", ha, HA_MIN, TRACK_MAX);
+      // the angle nearest the current one (it isn't bounded to one turn any more)
+      long cur;
+      if (sw::getPos(AXIS, cur)) ha += 360.0 * lround((angleOf(cur) - ha) / 360.0);
+      if (ha < HA_MIN - 90 || ha > trackMax() + 90) {  // sanity only: the mount is where it is
+        logf("ra: sync REFUSED, axis angle %.3f implausible", ha);
         break;
       }
       if (mode == SLEW) finishSlew("aborted by sync", 0);
       sw::stopSoft(AXIS);
       sw::waitStopped(AXIS);
-      setRegister(sw::degToCounts(params, ha));
-      logf("ra: synced to RA %.4f (HA register %.4f deg)", c.value, ha);
+      if (placeAngle(ha, REG_HOME)) {
+        persist::s.trusted = true;
+        logf("ra: synced to RA %.4f (axis angle %.4f deg, register %.1f)", c.value, ha, REG_HOME);
+      } else {
+        logf("ra: sync to RA %.4f FAILED", c.value);
+      }
       startTracking();
       break;
     }
@@ -523,8 +602,7 @@ static void handle(const Cmd &c) {
       if (mode == SLEW) finishSlew("aborted", 0);
       sw::stopSoft(AXIS);
       sw::waitStopped(AXIS);
-      if (setRegister(sw::degToCounts(params, c.value))) logf("ra: register set to %.4f deg", c.value);
-      else logf("ra: register value %.4f deg REFUSED", c.value);
+      if (placeAngle(c.value, REG_HOME)) logf("ra: axis angle set to %.4f deg", c.value);  // debug
       startTracking();
       break;
     case EAST_LIMIT: {
@@ -532,21 +610,13 @@ static void handle(const Cmd &c) {
         logf("ra: east limit change REFUSED during a slew");
         break;
       }
-      long counts;
-      if (!sw::getPos(AXIS, counts)) break;
-      double delta = c.value - settings.raEastLimit;  // register = HA - eastLimit + MARGIN
-      double reg = sw::countsToDeg(params, counts) - delta;
-      if (reg < 0.5 || reg > TRACK_MAX) {
-        logf("ra: east limit %.1f REFUSED, register would be %.3f deg", c.value, reg);
-        break;
-      }
-      sw::stopSoft(AXIS);
-      sw::waitStopped(AXIS);
-      setRegister(sw::degToCounts(params, reg));
+      // axis angle = HA - eastLimit + MARGIN: the same physical position moves by -delta
+      // in angle, so only the shift changes; the register (and the motor) stay as they are
+      double delta = c.value - settings.raEastLimit;
+      shift += delta;
       settings.raEastLimit = c.value;
       settingsSave();
-      logf("ra: east limit %.1f deg (offset %.1f), register shifted to %.3f deg", c.value, offset(), reg);
-      startTracking();
+      logf("ra: east limit %.1f deg (offset %.1f), shift %.3f", c.value, offset(), shift);
       break;
     }
     case PEC_CMD:
@@ -594,8 +664,9 @@ static void handle(const Cmd &c) {
     case HOME:
       sw::stopSoft(AXIS);
       sw::waitStopped(AXIS);
-      setRegister(sw::degToCounts(params, offset()));
-      logf("ra: register set to home (HA 0, register %.1f deg)", offset());
+      placeAngle(offset(), REG_HOME);
+      persist::s.trusted = false;
+      logf("ra: home (HA 0, axis angle %.1f)", offset());
       startTracking();
       break;
     case GUIDE: {
@@ -652,13 +723,18 @@ static void task(void *) {
     xSemaphoreTake(stateLock, portMAX_DELAY);
     st.counts = counts;
     st.countsMs = millis();
-    st.axisHa = sw::countsToDeg(params, counts);
+    st.axisHa = angleOf(counts);
+    st.registerDeg = registerOf(counts);
     st.axisRa = axisRaFromCounts(counts);
     xSemaphoreGive(stateLock);
     if (mode == MANUAL) {
-      double reg = sw::countsToDeg(params, counts);
-      if (reg < 0.5 || reg > trackMax()) {
-        logf("ra: manual move STOPPED at the register limit (%.3f deg)", reg);
+      double a = angleOf(counts), reg = registerOf(counts);
+      if (a < HA_MIN - 30 || a > trackMax() || reg < REG_MIN || reg > REG_MAX) {
+        logf("ra: manual move STOPPED at the %s (axis angle %.3f, register %.3f)",
+             reg < REG_MIN || reg > REG_MAX ? "register band edge" : "RA limit", a, reg);
+        sw::stopHard(AXIS);
+        sw::waitStopped(AXIS);
+        if (reg < REG_MIN + 5 || reg > REG_MAX - 5) recentre(REG_HOME, "manual move");
         st.guideEast = st.guideWest = false;
         trackT1 = baseT1;
         startTracking();

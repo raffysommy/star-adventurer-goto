@@ -75,33 +75,31 @@ void test_east_limit_window() {
   TEST_ASSERT_TRUE(selectTarget(lst + 1, lst, MARGIN).flipped);
 }
 
-// A sync keeps the branch the mount is on, even past the GoTo window
+// A sync keeps the branch the mount is on, even past the GoTo window or a limit
 void test_sync_keeps_branch() {
-  const double off = MARGIN + 30, lst = 100, trackMax = 235;
-  bool ok;
-  // flipped target tracked 1 h past the meridian: register ~ 32 + 180 + 15 = 227
-  RaTarget t = selectSyncTarget(lst - 15, lst, off, 227, trackMax, ok);
-  TEST_ASSERT_TRUE(ok);
-  TEST_ASSERT_TRUE(t.flipped);                 // selectTarget would say normal branch
+  const double off = MARGIN + 30, lst = 100;
+  // flipped target tracked 1 h past the meridian: axis angle ~ 32 + 180 + 15 = 227
+  RaTarget t = selectSyncTarget(lst - 15, lst, off, 227);
+  TEST_ASSERT_TRUE(t.flipped);  // selectTarget would say normal branch
   TEST_ASSERT_FALSE(selectTarget(lst - 15, lst, off).flipped);
   TEST_ASSERT_DOUBLE_WITHIN(0.01, 227, hourAngle(t.ra, lst, off));
-  // same RA, mount on the normal branch (register 47): stays normal
-  t = selectSyncTarget(lst - 15, lst, off, 47, trackMax, ok);
-  TEST_ASSERT_TRUE(ok);
-  TEST_ASSERT_FALSE(t.flipped);
-  // fresh mount (register at home) agrees with the GoTo choice (off the exact
-  // window edge, where either branch is fine)
+  // same RA, mount on the normal branch (angle 47): stays normal
+  TEST_ASSERT_FALSE(selectSyncTarget(lst - 15, lst, off, 47).flipped);
+  // exactly at / past a limit (the 2026-09-27 bug): still the nearest branch
+  TEST_ASSERT_FALSE(selectSyncTarget(lst - 30.0001, lst, off, 62.0001).flipped);
+  TEST_ASSERT_TRUE(selectSyncTarget(lst - 30.0001, lst, off, 242.0001).flipped);
+  // a small correction near the nearest candidate: fine
+  TEST_ASSERT_TRUE(selectSyncTarget(lst - 15, lst, off, 227 + 10).flipped);
+  // position unknown (assumed home, far from both): the GoTo window decides
   for (double req = 0.5; req < 360; req += 1) {
-    t = selectSyncTarget(req, lst, off, off, trackMax, ok);
-    TEST_ASSERT_TRUE(ok);
-    TEST_ASSERT_EQUAL_INT(selectTarget(req, lst, off).flipped, t.flipped);
+    double home = off;  // HA 0
+    RaTarget s = selectSyncTarget(req, lst, off, home);
+    double a0 = hourAngle(req, lst, off);
+    if (fabs(a0 - home) > SYNC_NEAR + 1 && fabs(a0 - 180 - home) > SYNC_NEAR + 1 && fabs(a0 + 180 - home) > SYNC_NEAR + 1)
+      TEST_ASSERT_EQUAL_INT(selectTarget(req, lst, off).flipped, s.flipped);
   }
-  // past the tracking limit on both branches: refused
-  selectSyncTarget(lst - 239, lst, MARGIN, 100, trackMax, ok);  // registers 241 and 61 -> 61 valid
-  TEST_ASSERT_TRUE(ok);
 }
 
-// What the INDI OnStep driver actually sends (tools/onstep/capture-indi-2.2.0.log)
 void test_onstep_parsing() {
   double v;
   TEST_ASSERT_TRUE(parseOnStepRa("17:30:00.00#", v));

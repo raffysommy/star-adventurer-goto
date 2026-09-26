@@ -242,7 +242,7 @@ The 360° DEC axis reaches every patch of sky on two branches: normal, or with D
 - **Without sky:** the camera accelerometer does the same. On the two branches, for the same pointing, the camera is rolled 180°, so gravity sits on opposite sides of the camera frame.
 - The DEC-move test (the sign of ΔDec for +steps) also works, but costs a move and two solves.
 
-## RA register window (implemented 2026-09-26, east limit still 0 until the clearance check)
+## RA register window (implemented 2026-09-26; east limit −30 set; register limit removed 2026-09-27, see the README)
 
 **Today:** register = HA + 2° (`OFFSET`, from `offset_star_adventurer`), and GoTo/sync are limited to register 2°–183°.
 - This keeps clear of both register failures: below 0 tracking stalls, and above 241.7° the 24-bit value overflows.

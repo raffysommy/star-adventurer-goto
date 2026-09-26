@@ -47,6 +47,9 @@ String reportedDec();             // "sDD*MM:SS"
 // 'W' = flipped branch (through the pole).
 char pierSide();
 bool busy();                      // slewing or guiding (:D)
+// Position established by a sync since the last power-on (after a power-on the mount
+// starts from an assumed home and needs a sync)
+bool positionTrusted();
 bool tracking();
 
 }  // namespace mount
