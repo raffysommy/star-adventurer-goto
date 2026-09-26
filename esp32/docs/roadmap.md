@@ -66,6 +66,7 @@ Order from the design doc:
    - hand-slew detection and push-to
    - collision layers: accelerometer tilt rules, gyro stall detection during slews, taught limits
    - possibly exposed as OnStep "encoders"
+   - **automatic DEC backlash and scale at startup** from the gyro (see the calibration table in the design doc)
 4. **Base box IMU + magnetometer (LSM6DSV + QMC6309)**, I2C0 SDA 8 / SCL 9:
    - T0 polar alignment
    - knob feedback

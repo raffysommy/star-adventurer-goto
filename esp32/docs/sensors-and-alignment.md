@@ -226,6 +226,7 @@ T1 and T2 are estimates on paper and need measuring. The magnetometer's remainin
 | Base IMU → polar axis | Rotate RA 60–90° and fit the cone traced by the camera IMU's gravity vector (its axis is the polar axis). Compare with the base IMU at the same moment | Once, while the box sits in its keyed insert |
 | Camera IMU → camera (offsets, temperature model) | Every plate solve: predicted vs measured gravity in the IMU frame | Continuous, learned over nights |
 | DEC axis in the camera frame | Short DEC move at startup (gyro, or two solves) | Each session, and when the camera is rotated in the collar |
+| **DEC backlash and scale** (auto) | The same startup move, ±1–2°. After a reversal, the motor steps counted until the gyro sees the camera turn = backlash (at 100–200 steps/s, well above gyro noise; repeat and average). Rotation vs steps = steps/°. Steps with no rotation beyond the backlash = slip | Each session near the imaging pose, and after a meridian flip (the load side changes). Accept only 100–500 steps and consistent repeats, else keep the old value. Never while guiding |
 | RA/DEC non-orthogonality (bracket) | Against a T3 run | Once |
 | Magnetometer (hard/soft iron) | Fully assembled rig turned through a full circle once, at a reference RA angle | When the box layout or site changes |
 | Magnetometer heading offset | Learned from each T3 run | Continuous |
